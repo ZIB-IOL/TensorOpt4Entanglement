@@ -98,14 +98,14 @@ function runEntangle(args)
         param.time_limit = param.time_limit < 0 ? 10800 : param.time_limit
         param.pointsize_bound = 1096 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
         param.rank_bound =  652 + 10
-        param.maxrounds = 1096 + 10
+        param.maxrounds = 652 + 10
         param.heur_MANOPT_maxiter = 150
-        param.heur_MANOPT1_maxiter = 250
+        param.heur_MANOPT1_maxiter = 200
         param.heur_LADMM_maxiter = 4
-        param.heur_LADMM1_maxiter = 10
+        param.heur_LADMM1_maxiter = 8
         param.heur_LADMM_rho = 10
         param.maxnnodes = 0
-        param.maxeffortnnodes = 10
+        param.maxeffortnnodes = 15
     elseif nsubs == 6
         param.time_limit = 10800
         param.pointsize_bound =  150 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)

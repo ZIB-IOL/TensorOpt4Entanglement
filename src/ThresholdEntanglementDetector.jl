@@ -267,6 +267,7 @@ function detectEntanglementThresholdDiscrete(HR::Matrix{Float64}, HI::Matrix{Flo
 
 
     # get the lower and upper bounds
+
     ub, lb, purestates, substates, weights, multipliers, weights_sum = cuttingPlane(detector, separateproblem, param, 1)
 
     return ub, lb, ub, 0.0
@@ -291,7 +292,7 @@ function detectEntanglementThresholdAlternate(HR::Matrix{Float64}, HI::Matrix{Fl
     # add more states to match the point size bound
     purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
     addBatchStates(detector, purestates_, substates_, param.lazification)
-
+    weights  = ones(length(detector.substates)) / length(detector.substates)
     # get the lower and upper bounds
     ub, purestates, substates = alternateSolve(dims, HR + im * HI, detector.purestates, detector.substates, weights, param)
 
