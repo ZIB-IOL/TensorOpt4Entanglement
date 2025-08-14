@@ -69,6 +69,7 @@ function runEntangle(args)
     glbub = Inf
     glblb = -Inf
     approxub = Inf
+    approxfeas = 0.0
     approxweights = 0
     # adjust parameters based on dimensions
     if  nsubs == 3
@@ -82,6 +83,9 @@ function runEntangle(args)
         param.heur_LADMM1_maxiter = 15
         param.maxnnodes = 120
         param.maxeffortnnodes = 70
+        param.heur_alternate_iter = 10
+        param.heur_alternate1_iter = 15
+        heur_alternate_maxfail = 1
     elseif nsubs == 4
         param.time_limit = param.time_limit < 0 ? 7200 : param.time_limit
         param.pointsize_bound =  512 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
@@ -94,6 +98,9 @@ function runEntangle(args)
         param.heur_LADMM_rho = 5
         param.maxnnodes = 100
         param.maxeffortnnodes = 50
+        param.heur_alternate_iter = 10
+        param.heur_alternate1_iter = 15
+        heur_alternate_maxfail = 1
     elseif nsubs == 5
         param.time_limit = param.time_limit < 0 ? 10800 : param.time_limit
         param.pointsize_bound = 1096 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
@@ -106,6 +113,9 @@ function runEntangle(args)
         param.heur_LADMM_rho = 10
         param.maxnnodes = 0
         param.maxeffortnnodes = 15
+        param.heur_alternate_iter = 4
+        param.heur_alternate1_iter = 8
+        heur_alternate_maxfail = 1
     elseif nsubs == 6
         param.time_limit = 10800
         param.pointsize_bound =  150 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
@@ -125,11 +135,16 @@ function runEntangle(args)
         elseif args["algo"] == "D"
             param.maxrounds = -1
             glbub, glblb, approxub, approxfeas = detectEntanglementThresholdDiscrete(HR, HI, dims, param)
+            approxweights = 0  # Reset since this algorithm doesn't return approxweights
         elseif args["algo"] == "A"
-            param.alternae_iter = -1
+            param.heur_alternate_iter = -1
+            param.heur_alternate1_iter = -1
+            heur_alternate_maxfail = 1
             glbub, glblb, approxub, approxfeas = detectEntanglementThresholdAlternate(HR, HI, dims, param)
-        elseif args["algo"] == "H"
-            glbub, glblb, approxub, approxfeas = detectEntanglementThresholdHybridSingle(HR, HI, dims, param)
+            approxweights = 0  # Reset since this algorithm doesn't return approxweights
+        elseif args["algo"] == "AD"
+            glbub, glblb, approxub, approxfeas = detectEntanglementThresholdHybridSingle(HR, HI, dims, param) # This is called to ensure the hybrid method is also executed
+            approxweights = 0  # Reset since this algorithm doesn't return approxweights
         elseif args["algo"] == "LD0"
             param.loop = -2
             glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)

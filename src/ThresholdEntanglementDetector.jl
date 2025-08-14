@@ -304,9 +304,9 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
     #purestates = getPureStates(HR, HI, dims, param)
     singlerun = false
     clearall = false
-    maxi = 1
+    maxi = 10000000
     singlerun = false
-    clearall = true
+    clearall = false
 
     # create the separate problem
     separateproblem = Problem(HR, HI, dims)
@@ -318,9 +318,9 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
     ub = 0.5
     glbub = Inf
     glblb = -Inf
-    approxub = Inf
+    approxub = 1.0
+    approxfeas = 0.0
     approxweights = 0.0
-    approxfeas = Inf
 
     nz_purestates = []
     nz_substates = []
@@ -332,37 +332,44 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
     # add the identity state
     identitystate =  Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
     addRank1State(detector, identitystate, nothing, nothing, true, param.lazification, param.pointsize_bound)
-    weights = ones(length(detector.substates)) / length(detector.substates)
-    substates = detector.substates
+    npersistent = length(detector.substates)
+    # add more states to match the point size bound
+    purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
+    addBatchStates(detector, purestates_, substates_, param.lazification)
+    ncomplementpoints = length(detector.substates) - npersistent
+    # assign weights
+    weights = vcat([2.0 / (2 * npersistent + ncomplementpoints) for _ in 1:npersistent], [1.0 / (2 * npersistent + ncomplementpoints) for _ in 1:ncomplementpoints])
+    @assert length(weights) == length(detector.substates) "Weights and substates must have the same length $(length(weights)) != $(length(detector.substates))"
 
-    nz_purestates = detector.purestates
-    nz_substates =  detector.substates
-    nz_weights = weights
+    nnz = max(param.pointsize_bound - param.rank_bound, 0)
+    nz_purestates = detector.purestates[end - nnz:end]
+    nz_substates = detector.substates[end - nnz:end]
+
     for i in 1:maxi
         println("Lifting-discretization iteration: $i / $(param.loop)")
         # sort the weights in descending order
         sorted_weights = sort(weights, rev=true)
         sorted_indices = sortperm(weights, rev=true)
         # get sorted substates
-        sorted_substates = substates[sorted_indices]
+        sorted_substates = detector.substates[sorted_indices]
+        sorted_purestates = detector.purestates[sorted_indices]
         nfactor = min(length(sorted_weights), param.rank_bound)
         # get the top nfactor substates and weights
         weights = sorted_weights[1:nfactor]
         substates = sorted_substates[1:nfactor]
+        purestates = sorted_purestates[1:nfactor]
         # get the nonzero substates
         # normalize the weights
         weights ./= sum(weights)
 
-        purestates, substates, approxub, approxfeas, weights = ALMADMMSolve(dims, HR + im * HI, substates, weights, 1 - ub, multipliers, param, i != 1, singlerun)
-
-        ub, purestates, substates = alternateSolve(dims, HR + im * HI, purestates, substates, weights, param)
+        ub, purestates, substates = alternateSolve(dims, HR + im * HI, purestates, substates, weights, param, i == 1)
         glbub = min(glbub, ub)
 
+        # get the nonzero weights and substates
         clearStates(detector, clearall)
-
         addBatchStates(detector, purestates, substates, param.lazification)
         addBatchStates(detector, nz_purestates, nz_substates)
-        # add the identity state
+
         # get the lower and upper bounds
         ub, lb, terminate, purestates, substates, weights, multipliers, weights_sum = cuttingPlane(detector, separateproblem, param, 1, singlerun)
         glbub = min(glbub, ub)
@@ -375,13 +382,14 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
         ct = 0
         # filter out non-zero weights
         for i in 1:length(weights)
-            if weights[i] > 1e-9
+            if weights[i] > 1e-7
                 push!(nz_substates, substates[i])
                 push!(nz_weights, weights[i])
                 push!(nz_purestates, purestates[i])
                 ct += 1
             end
         end
+
         approxweights = weights_sum
         weights = nz_weights
         substates = nz_substates
@@ -398,6 +406,6 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
             break
         end
     end
-    println("Loop finished $(param.loop)")
-    return glbub, glblb, approxub, approxfeas, approxweights
+
+    return glbub, glblb, glub, 0.0, approxweights
 end

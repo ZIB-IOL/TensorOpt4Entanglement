@@ -177,16 +177,17 @@ function price(Xdual, Xvals, nrank1, nsubs, freesyss)
     return success, freesyss_
 end
 
-function alternateSolve(dims, H, purestates, substates, weights, param)
+function alternateSolve(dims, H, purestates, substates, weights, param, firstrun = false)
     dimH = prod(dims)
     nsubs = length(dims)
 
     Min = Dict(:RE=> Matrix( Diagonal(ones(dimH) / dimH)), :IM=>zeros(dimH, dimH))
     Mdir = Dict(:RE=> real(H) - Min[:RE], :IM=> imag(H) - Min[:IM])
 
-    maxiter = param.alternae_iter == -1 ? 1000000 : param.alternae_iter
+    maxiter = firstrun ? param.heur_alternate1_iter : param.heur_alternate_iter
+    maxiter =  maxiter == -1 ? 1000000 : maxiter
     fail = 0
-    maxfail = 4
+    maxfail =  param.heur_alternate_maxfail
 
     Random.seed!(param.seed)
     Xvals = [ [x *x' / (norm(x)^2) for x in substate] for (i, substate) in enumerate(substates) if weights[i] > 1e-6 ]

@@ -39,6 +39,6 @@ module ExactEntanglement
    include("ALM.jl")
    include("run.jl")
    export Param
-   export detectEntanglementThresholdLiftDiscrete, detectEntanglementThresholdDiscrete
+   export detectEntanglementThresholdLiftDiscrete, detectEntanglementThresholdDiscretem, detectEntanglementThresholdHybridSingle
    export runEntangle
 end # module ExactStateSeparator

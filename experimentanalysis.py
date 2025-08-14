@@ -9,13 +9,14 @@ class ExperimentInstance:
         self.dimH = dimH
 
 class ExperimentResult:
-    def __init__(self, instance: str, algo: str, glbub: float, approxub: float, glblb: float, approxweights: float, time: float):
+    def __init__(self, instance: str, algo: str, glbub: float, approxub: float, glblb: float, approxweights: float, approxfeas: float, time: float):
         self.instance = instance
         self.algo = algo
         self.glbub = glbub
         self.approxub = approxub
         self.glblb = glblb
         self.approxweights = approxweights
+        self.approxfeas = approxfeas
         self.time = time
 
 
@@ -57,13 +58,15 @@ def load_results(result_dir):
                     glblb = float(line.split(':')[1].strip())
                 elif line.startswith('approxweights'):
                     approxweights = float(line.split(':')[1].strip())
+                elif line.startswith('approxfeas'):
+                    approxfeas = float(line.split(':')[1].strip())
                 elif line.startswith('time'):
                     time = float(line.split(':')[1].strip())
                 elif line.startswith('algo'):
                     algo = line.split(':')[1].strip()
                 elif line.startswith('instance'):
                     instance = line.split(':')[1].strip()
-            result = ExperimentResult(instance, algo, glbub, approxub, glblb, approxweights, time)
+            result = ExperimentResult(instance, algo, glbub, approxub, glblb, approxweights, approxfeas, time)
             results.append(result)
     return results
 
@@ -94,10 +97,12 @@ for instance in instances:
         found = False
         for result in instance_results[instance.filename]:
             if result.algo == algo:
-                printoutstr += f"& {algonames[algo]} & {result.glbub:.6f} & {result.glblb:.6f} & {int(result.time)} \\\\ \n "
+                approxub_str = '-' if result.approxfeas == 0.0 else f'{result.approxub:.5f}'
+                approxfeas_str = '-' if result.approxfeas == 0.0 else f'{result.approxfeas:.5f}'
+                printoutstr += f"& {algonames[algo]} & {result.glbub:.5f} & {result.glblb:.5f} & {approxub_str} & {approxfeas_str} & {int(result.time)} \\\\ \n "
                 found = True
                 break
         if not found:
-            printoutstr += " & N/A & N/A & N/A "
+            printoutstr += " & N/A & N/A & N/A & N/A & N/A \\\\ \n"
     print(printoutstr)
 print("\\bottomrule")
