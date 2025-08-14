@@ -1,7 +1,0 @@
-instance: state_3.jl
-algo: A
-glbub: 0.8954776395888248
-approxub: 0.8954776395888248
-glblb: -Inf
-approxweights: 0
-time: 346.311046243

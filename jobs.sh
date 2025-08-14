@@ -1,6 +1,6 @@
 #!/bin/bash
 # Set variables
-timelimit=3600
+timelimit=-1
 timebound=3900
 algorithms=("LDL" "D" "A" "LD1")
 datapath="$PWD/benchmark"

@@ -17,6 +17,7 @@ mutable struct Param
    log_level::Int # log level
    thread::Int # thread number
    maxnnodes::Int # max number of nodes
+   maxeffortnnodes::Int # max number of nodes
    minnnodes::Int # min number of nodes
    maxrounds::Int # max number of separation rounds
    seed::Int # random seed
@@ -28,8 +29,10 @@ mutable struct Param
    heur_LADMM_obj_tol::Float64
    heur_LADMM_step_tol::Float64
    heur_LADMM_gd_tol::Float64
+   heur_LADMM_rho::Float64
    heur_MANOPT_depth::Int
    heur_MANOPT_maxiter::Int
+   heur_MANOPT1_maxiter::Int
    alternae_iter::Int
    nalpha::Int
    extrascale::Float64
@@ -49,11 +52,13 @@ mutable struct Param
    rank_bound::Int # lower bound for rank
 
    function Param(; solver::String="MSK", time_limit::Float64=200.0, obj_tol::Float64=1e-6, rel_obj_tol::Float64=7e-3, master_obj_tol::Float64=1e-6, tol::Float64 = 1e-6, feas_tol::Float64 = 1e-6, log_level::Int=1,
-         thread::Int=1, maxnnodes::Int=100, minnnodes::Int=10, maxrounds::Int=100, seed::Int=12345, heur_FW_maxiters::Int = 20000, heur_AD_depth::Int = 1, heur_AD_maxiters::Int = 300,
-         heur_LADMM1_maxiter::Int = 5, heur_LADMM_obj_tol::Float64 = 1e-5, heur_LADMM_step_tol::Float64 = 1e-4, heur_LADMM_gd_tol::Float64 = 1e-4,  heur_LADMM_maxiter::Int = 3, heur_MANOPT_depth::Int = 1, heur_MANOPT_maxiter::Int = 150, alternae_iter::Int= 100, nalpha::Int = 5, extrascale::Float64 = 0.0, inout_maxreset::Int = 3, effort_freq::Int = 1000, norm::Int = 2,
+         thread::Int=1, maxnnodes::Int=100, maxeffortnnodes::Int=200, minnnodes::Int=0, maxrounds::Int=100, seed::Int=12345, heur_FW_maxiters::Int = 20000, heur_AD_depth::Int = 1, heur_AD_maxiters::Int = 300,
+         heur_LADMM1_maxiter::Int = 5, heur_LADMM_obj_tol::Float64 = 1e-5, heur_LADMM_step_tol::Float64 = 1e-4, heur_LADMM_gd_tol::Float64 = 1e-4, heur_LADMM_rho::Float64 = 1.0, heur_LADMM_maxiter::Int = 3, heur_MANOPT_depth::Int = 1,
+         heur_MANOPT_maxiter::Int = 150, heur_MANOPT1_maxiter::Int = 150, alternae_iter::Int= 100, nalpha::Int = 5, extrascale::Float64 = 0.0, inout_maxreset::Int = 3, effort_freq::Int = 1000, norm::Int = 2,
          multcut_varsize::Int = 5, multcut_initlpsize::Int = 30, max_obbt::Int = 0, freq_globalobbt::Int = 20, enable_dps::Bool = true, loop::Int = 2, start_time::Float64 = time(), lazification::Bool = false, pool_size::Int = 5000, pointsize_bound::Int = 100, rank_bound::Int = 500)
-         new(solver, time_limit, obj_tol, rel_obj_tol, master_obj_tol, tol, feas_tol, log_level, thread, maxnnodes, minnnodes, maxrounds, seed, heur_FW_maxiters, heur_AD_depth,
-            heur_AD_maxiters, heur_LADMM1_maxiter,  heur_LADMM_maxiter, heur_LADMM_obj_tol, heur_LADMM_step_tol, heur_LADMM_gd_tol, heur_MANOPT_depth, heur_MANOPT_maxiter,alternae_iter,  nalpha, extrascale, inout_maxreset, effort_freq, norm, multcut_varsize,
+         new(solver, time_limit, obj_tol, rel_obj_tol, master_obj_tol, tol, feas_tol, log_level, thread, maxnnodes, maxeffortnnodes, minnnodes, maxrounds, seed, heur_FW_maxiters, heur_AD_depth,
+            heur_AD_maxiters, heur_LADMM1_maxiter,  heur_LADMM_maxiter, heur_LADMM_obj_tol, heur_LADMM_step_tol, heur_LADMM_gd_tol, heur_LADMM_rho, heur_MANOPT_depth, heur_MANOPT_maxiter, heur_MANOPT1_maxiter,
+            alternae_iter,  nalpha, extrascale, inout_maxreset, effort_freq, norm, multcut_varsize,
             multcut_initlpsize, max_obbt, freq_globalobbt, enable_dps, loop, start_time, lazification, pool_size, pointsize_bound, rank_bound)
    end
 end

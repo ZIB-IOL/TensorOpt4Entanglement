@@ -63,7 +63,8 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
    end
    stateseparator.selectnode = 1
    nnodes = 1
-   while nnodes <= param.maxnnodes
+   maxnnodes = effortlevel >= 2 ? param.maxeffortnnodes : param.maxnnodes
+   while nnodes <= maxnnodes
       status = RelaxUnsolve
       sol = nothing
       while !isempty(stateseparator.opennodes)
@@ -145,7 +146,7 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
       end
       stateseparatorCreateBranchNodes!(stateseparator, branchnode, bpoint[1], bpoint[2], bpoint[3], bpoint[4], bpoint[5])
       nnodes = stateseparatorGetNNodes(stateseparator)
-      if stateseparator.param.log_level > 0 && nnodes == param.maxnnodes
+      if stateseparator.param.log_level > 0 && nnodes == maxnnodes
          print("--max node number reached: $(length(stateseparator.nodes)), terminated\n")
       end
   end

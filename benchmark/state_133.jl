@@ -1,5 +1,6 @@
 using Ket
 
+name = "Dicke_3_1"
 T = Float64
 N = 3
 dims = Tuple(fill(2, N))

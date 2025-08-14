@@ -199,6 +199,7 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
             push!(detector.substates, substates)
             push!(detector.purestates, state)
             push!(detector.ispersistent, recordindx)
+            push!(detector.presistentinds, length(detector.purestates))
             if addtoPool
                 push!(detector.poolpurestates, state)
                 push!(detector.poolsubstates, substates)
@@ -208,6 +209,7 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
             push!(detector.substates, substates)
             push!(detector.purestates, state)
             push!(detector.ispersistent, recordindx)
+            push!(detector.presistentinds, length(detector.purestates))
             if addtoPool
                 push!(detector.poolpurestates, state)
                 push!(detector.poolsubstates, substates)

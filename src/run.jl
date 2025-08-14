@@ -73,26 +73,39 @@ function runEntangle(args)
     # adjust parameters based on dimensions
     if  nsubs == 3
         param.time_limit = param.time_limit < 0 ? 3600 : param.time_limit
-        param.pointsize_bound =  256 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
-        param.rank_bound =  256
+        param.pointsize_bound = 256 + 10 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
+        param.rank_bound =  256 + 10
+        param.maxrounds = 256 + 10
         param.heur_MANOPT_maxiter = 150
+        param.heur_MANOPT1_maxiter = 150
         param.heur_LADMM_maxiter = 10
         param.heur_LADMM1_maxiter = 15
+        param.maxnnodes = 120
+        param.maxeffortnnodes = 70
     elseif nsubs == 4
-        param.time_limit = param.time_limit < 0 ? 3600 : param.time_limit
-        param.pointsize_bound =  256 * 2 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
-        param.rank_bound =  256 * 2
+        param.time_limit = param.time_limit < 0 ? 7200 : param.time_limit
+        param.pointsize_bound =  512 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
+        param.rank_bound = 512 + 10
+        param.maxrounds = 512 + 10
         param.heur_MANOPT_maxiter = 150
+        param.heur_MANOPT1_maxiter = 200
         param.heur_LADMM_maxiter = 10
         param.heur_LADMM1_maxiter = 15
+        param.heur_LADMM_rho = 5
+        param.maxnnodes = 100
+        param.maxeffortnnodes = 50
     elseif nsubs == 5
-        param.time_limit = param.time_limit < 0 ? 7200 : param.time_limit
-        param.pointsize_bound = 256  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
-        param.rank_bound =  256
-        param.heur_MANOPT_maxiter = 200
-        param.heur_LADMM_maxiter = 15
-        param.heur_LADMM1_maxiter = 20
+        param.time_limit = param.time_limit < 0 ? 10800 : param.time_limit
+        param.pointsize_bound = 1096 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
+        param.rank_bound =  652 + 10
+        param.maxrounds = 1096 + 10
+        param.heur_MANOPT_maxiter = 150
+        param.heur_MANOPT1_maxiter = 250
+        param.heur_LADMM_maxiter = 4
+        param.heur_LADMM1_maxiter = 10
+        param.heur_LADMM_rho = 10
         param.maxnnodes = 0
+        param.maxeffortnnodes = 10
     elseif nsubs == 6
         param.time_limit = 10800
         param.pointsize_bound =  150 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
@@ -104,25 +117,25 @@ function runEntangle(args)
     end
     elapsed_time = @elapsed begin
         if args["algo"] == "LD"
-            glbub, glblb, approxub, approxweights =  detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas, approxweights =  detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         elseif args["algo"] == "LDL"
             param.pool_size = 500 * (2 * sum(dims) + 1)
             #param.lazification = true
-            glbub, glblb, approxub, approxweights =  detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas, approxweights =  detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         elseif args["algo"] == "D"
             param.maxrounds = -1
-            glbub, glblb, approxub = detectEntanglementThresholdDiscrete(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas = detectEntanglementThresholdDiscrete(HR, HI, dims, param)
         elseif args["algo"] == "A"
             param.alternae_iter = -1
-            glbub, glblb, approxub = detectEntanglementThresholdAlternate(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas = detectEntanglementThresholdAlternate(HR, HI, dims, param)
         elseif args["algo"] == "H"
-            glbub, glblb, approxub = detectEntanglementThresholdHybridSingle(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas = detectEntanglementThresholdHybridSingle(HR, HI, dims, param)
         elseif args["algo"] == "LD0"
             param.loop = -2
-            glbub, glblb, approxub, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         elseif args["algo"] == "LD1"
             param.loop = -3
-            glbub, glblb, approxub, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
+            glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         end
     end
     #problem = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
@@ -135,6 +148,7 @@ function runEntangle(args)
         println(io, "algo: $(args["algo"])")
         println(io, "glbub: $glbub")
         println(io, "approxub: $approxub")
+        println(io, "approxfeas: $approxfeas")
         println(io, "glblb: $glblb")
         println(io, "approxweights: $approxweights")
         println(io, "time: $elapsed_time")

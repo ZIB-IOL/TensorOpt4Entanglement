@@ -3,8 +3,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --nodes=1
-#SBATCH --mem=8G
-#SBATCH --time=01:18:00
+#SBATCH --mem=10G
+#SBATCH --time=05:58:00
 #SBATCH --partition=opt_int
 #SBATCH --constraint=Gold5122
 #SBATCH --output=/dev/null

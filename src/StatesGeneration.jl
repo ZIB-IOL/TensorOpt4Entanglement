@@ -1,5 +1,6 @@
 function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, param::Param, effortlevel = 0, singlerun = false)
     initialLPRelaxation(detector, param)
+    print("LP relaxation created--\n")
     iter = 0
     nlmocall = 0
     nlazycall = 0
@@ -69,7 +70,6 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
             if is_time_limit_last(param)
                 println("Time limit is almost reached")
                 itereffortlevel = 2
-                param.maxnnodes = 30
             end
             lmocall = false
             if param.lazification && nlazyfound <= poolsize  # nlazycall < param.pool_size

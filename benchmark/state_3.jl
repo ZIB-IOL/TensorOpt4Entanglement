@@ -1,5 +1,6 @@
 using Ket
 
+name = ""
 T = Float64
 N = 4
 dims = Tuple(fill(2, N))

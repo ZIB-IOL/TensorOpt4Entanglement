@@ -452,9 +452,11 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
     min_step_tol = step_tol * 0.1
     min_gd_tol = gd_tol * 0.1
     multi_bound = 1e2
-    rho_max = 1e4
-    rho = 1e0
-    rhoscale = 0.3
+    rho_max = 2e2
+    rho_min = 1e-1
+    rho = param.heur_LADMM_rho
+    rhoscale = 0.4
+    tau = 0.8
     ηmax = 10
 
     dimH = reduce(*, dims)
@@ -464,7 +466,7 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
     Min = Dict(:RE=> Matrix( Diagonal(ones(dimH) / dimH)), :IM=>zeros(dimH, dimH))
     # direction matrix
 
-    Mdir = Dict(:RE=>  real(H) - Min[:RE], :IM=> imag(H) - Min[:IM])
+    Mdir = Dict(:RE=> real(H) - Min[:RE], :IM=> imag(H) - Min[:IM])
 
     sumdim = reduce(+, dims)
     cdims = deepcopy(dims)
@@ -493,9 +495,11 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
     maxiter = is_escaping ? param.heur_LADMM_maxiter : param.heur_LADMM1_maxiter
     maxiter = is_high_accuracy ? 100000000 : maxiter
     prev_pen = 0.0
+    cur_pen = 0.0
+    cur_f = 0.0
     indexmap = get_indexmap(dims)
 
-    maxmanoptiter = min(param.heur_MANOPT_maxiter, dimH * dimH *2 +1)
+    maxmanoptiter = min( is_escaping ? param.heur_MANOPT1_maxiter : param.heur_MANOPT_maxiter, dimH * dimH *2 +1)
     maxmanoptiter *= is_high_accuracy ? 2 : 1
     record = [:Iteration]
     for i in 1:maxiter  # adjust number of iterations as needed
@@ -552,16 +556,18 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
             clamp.(imag(multipliers_c), -multi_bound, multi_bound)
         )
         cur_pen = sqrt(pen)
-        if  cur_pen < prev_pen * rhoscale
+        cur_f = f
+        norm_vgl = norm(grad_l_closure(M, pX))
+
+        if cur_pen > norm_vgl * tau
             rho = min(rho / rhoscale, rho_max)
         else
-            rho = rho
+            rho = max(rho * rhoscale, rho_min)
         end
         prev_pen = cur_pen
 
         # check convergence
         feas_tol = obj_tol
-        norm_vgl = norm(grad_l_closure(M, pX))
         print("cur_pen: ", cur_pen, " < ", feas_tol, ", norm_vgl: ", norm_vgl, "<", min_gd_tol, "\n")
         if cur_pen < feas_tol && norm_vgl < min_gd_tol
             break
@@ -577,7 +583,7 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
     trc = fasttrace(M, pX)
     pX /= trc^(1/(2*M.nsubs))
     purestates_, substates_, weights_ = GetXvals_ADMM(pX, nrank1, sumdim, dims, cdims, nsubs)
-    return purestates_, substates_, 1 - z, weights_
+    return purestates_, substates_, 1 - z, cur_pen, weights_
 end
 
 function dummySolve(dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param)
