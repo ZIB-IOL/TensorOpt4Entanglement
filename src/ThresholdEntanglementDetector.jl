@@ -407,5 +407,5 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
         end
     end
 
-    return glbub, glblb, glub, 0.0, approxweights
+    return glbub, glblb, glbub, 0.0, approxweights
 end
