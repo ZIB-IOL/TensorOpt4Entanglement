@@ -1,0 +1,7 @@
+instance: state_13.jl
+algo: LDL
+glbub: 0.9999999927065866
+approxub: 0.9990973181591741
+glblb: 0.5072702872287851
+approxweights: 0.0
+time: 3614.353672728
