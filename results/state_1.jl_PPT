@@ -1,0 +1,8 @@
+instance: state_1.jl
+algo: PPT
+glbub: 0
+approxub: 0
+approxfeas: 0
+glblb: 0.03125000003229853
+approxweights: 0
+time: 3392.930891003
