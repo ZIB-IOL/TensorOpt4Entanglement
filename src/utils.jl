@@ -49,6 +49,7 @@ mutable struct Param
    loop::Int
    start_time::Float64 # time for state separation
    is_last::Bool # whether this is the last round of separation
+   tratio::Float64 # time ratio for last round
    lazification::Bool # whether to use lazification
    pool_size::Int # size of the pool for states
    pointsize_bound::Int # lower bound for rank
@@ -58,11 +59,11 @@ mutable struct Param
          thread::Int=1, maxnnodes::Int=100, maxeffortnnodes::Int=200, minnnodes::Int=0, maxrounds::Int=100, seed::Int=12345, heur_FW_maxiters::Int = 20000, heur_AD_depth::Int = 1, heur_AD_maxiters::Int = 300,
          heur_LADMM1_maxiter::Int = 5, heur_LADMM_obj_tol::Float64 = 1e-5, heur_LADMM_step_tol::Float64 = 1e-4, heur_LADMM_gd_tol::Float64 = 1e-4, heur_LADMM_rho::Float64 = 1.0, heur_LADMM_maxiter::Int = 3, heur_MANOPT_depth::Int = 1,
          heur_MANOPT_maxiter::Int = 150, heur_MANOPT1_maxiter::Int = 150, heur_alternate_iter::Int= 10, heur_alternate1_iter::Int = 20,  heur_alternate_maxfail::Int = 4, nalpha::Int = 5, extrascale::Float64 = 0.0, inout_maxreset::Int = 3, effort_freq::Int = 1000, norm::Int = 2,
-         multcut_varsize::Int = 5, multcut_initlpsize::Int = 30, max_obbt::Int = 0, freq_globalobbt::Int = 20, enable_dps::Bool = true, loop::Int = 2, start_time::Float64 = time(), is_last::Bool = false, lazification::Bool = false, pool_size::Int = 5000, pointsize_bound::Int = 100, rank_bound::Int = 500)
+         multcut_varsize::Int = 5, multcut_initlpsize::Int = 30, max_obbt::Int = 0, freq_globalobbt::Int = 20, enable_dps::Bool = true, loop::Int = 2, start_time::Float64 = time(), is_last::Bool = false, tratio::Float64 = 0.1, lazification::Bool = false, pool_size::Int = 5000, pointsize_bound::Int = 100, rank_bound::Int = 500)
          new(solver, time_limit, obj_tol, rel_obj_tol, master_obj_tol, tol, feas_tol, log_level, thread, maxnnodes, maxeffortnnodes, minnnodes, maxrounds, seed, heur_FW_maxiters, heur_AD_depth,
             heur_AD_maxiters, heur_LADMM1_maxiter,  heur_LADMM_maxiter, heur_LADMM_obj_tol, heur_LADMM_step_tol, heur_LADMM_gd_tol, heur_LADMM_rho, heur_MANOPT_depth, heur_MANOPT_maxiter, heur_MANOPT1_maxiter,
             heur_alternate_iter, heur_alternate1_iter,  heur_alternate_maxfail, nalpha, extrascale, inout_maxreset, effort_freq, norm, multcut_varsize,
-            multcut_initlpsize, max_obbt, freq_globalobbt, enable_dps, loop, start_time, is_last, lazification, pool_size, pointsize_bound, rank_bound)
+            multcut_initlpsize, max_obbt, freq_globalobbt, enable_dps, loop, start_time, is_last, tratio, lazification, pool_size, pointsize_bound, rank_bound)
    end
 end
 
@@ -84,7 +85,7 @@ end
 function is_time_limit_last(param::Param)
    elapsed = get_elapsed_time(param)
    println("Elapsed time: $elapsed seconds, Time limit: $(param.time_limit) seconds $(param.is_last)")
-   tratio = 0.9
+   tratio = 1 - param.tratio
    if !param.is_last &&  elapsed > tratio * param.time_limit
       # give enough time for the last round
       param.time_limit += elapsed - tratio * param.time_limit
