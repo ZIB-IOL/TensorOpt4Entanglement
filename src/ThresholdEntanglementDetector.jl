@@ -299,6 +299,24 @@ function detectEntanglementThresholdAlternate(HR::Matrix{Float64}, HI::Matrix{Fl
     return ub, -Inf64, ub, 0.0
 end
 
+function detectEntanglementThresholdPPT(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+    #purestates = getPureStates(HR, HI, dims, param)
+    H = HR + im * HI
+    dimH = reduce(*, dims)
+    if dims == [2, 2, 2, 2, 2]
+        val, _ = Ket.entanglement_robustness(Matrix(ρ), [8,4], 1; noise="white", ppt=true, inner=false, verbose = true)
+        val /= dimH
+
+    elseif dims == [2, 2, 2, 2]
+        val, _ = Ket.entanglement_robustness(Matrix(ρ), [4,4], 2; noise="white", ppt=true, inner=false, verbose = true)
+        val /= dimH
+    elseif dims == [2, 2, 2]
+        val, _ = Ket.entanglement_robustness(Matrix(ρ), [4,2], 6; noise="white", ppt=true, inner=false, verbose = true)
+        val /= dimH
+    end
+    lb = val
+    return lb
+end
 
 function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     #purestates = getPureStates(HR, HI, dims, param)

@@ -145,6 +145,12 @@ function runEntangle(args)
         elseif args["algo"] == "AD"
             glbub, glblb, approxub, approxfeas = detectEntanglementThresholdHybridSingle(HR, HI, dims, param) # This is called to ensure the hybrid method is also executed
             approxweights = 0  # Reset since this algorithm doesn't return approxweights
+        elseif args["algo"] == "PPT"
+            glblb = detectEntanglementThresholdPPT(HR, HI, dims, param)
+            glbub = 0
+            approxub = 0
+            approxfeas  = 0
+            approxweights = 0
         elseif args["algo"] == "LD0"
             param.loop = -2
             glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)

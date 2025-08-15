@@ -29,6 +29,7 @@ function solveModel(optmodel::OptModel, BST, param::Param, silent = false, restr
 end
 
 
+
 function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt = false)
    # create a StateSeparator problem data structure
    print("--separating...\n")

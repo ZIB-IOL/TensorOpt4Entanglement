@@ -1,7 +1,7 @@
 using Ket
 
 
-name = ""
+name = "Cluster_5"
 T = Float64
 N = 5
 dims = Tuple(fill(2, N))

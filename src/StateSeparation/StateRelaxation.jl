@@ -580,24 +580,21 @@ function addConstraintsFromParents(stateseparator::StateSeparator, optmodel::Opt
     end
 end
 
-function strenghtenRelaxation(stateseparator::StateSeparator, optmodel::OptModel, focusnode::Node, usepartialtrace = true, usecomplexmc = true, userank1 = false)
+function strenghtenRelaxation(stateseparator::StateSeparator, optmodel::OptModel, focusnode::Node, usedps = false, usepartial = true, usecomplexmc = true, userank1 = false)
     applyBounds(stateseparator, optmodel, focusnode )
     addTensorMcCormickConstraints(stateseparator, optmodel, focusnode)
     if usecomplexmc
         addComplexMcCormickConstraints(stateseparator, optmodel, focusnode )
     end
-    if usepartialtrace
+    if usepartial
         addPatialTraceConstraints(stateseparator, optmodel, focusnode)
         #addRank1Constraints(stateseparator, optmodel, focusnode)
     end
-    if userank1
-        addRank1Constraints(stateseparator, optmodel, focusnode)
-    end
 end
 
-function initRelaxationNode(stateseparator::StateSeparator, focusnode::Node, primalbd::Float64, userank1 = false)
+function initRelaxationNode(stateseparator::StateSeparator, focusnode::Node, primalbd::Float64, usedps = false)
     optmodel = buildRelaxationTrivial(stateseparator.problem, primalbd + stateseparator.param.obj_tol)
-    strenghtenRelaxation(stateseparator, optmodel, focusnode, userank1)
+    strenghtenRelaxation(stateseparator, optmodel, focusnode, usedps)
     return optmodel
 end
 

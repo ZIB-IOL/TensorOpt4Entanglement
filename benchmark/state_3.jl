@@ -1,6 +1,6 @@
 using Ket
 
-name = ""
+name = "Cluster_4"
 T = Float64
 N = 4
 dims = Tuple(fill(2, N))

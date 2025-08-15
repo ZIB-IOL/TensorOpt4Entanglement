@@ -1,8 +1,8 @@
 bash jobs.sh
 #rm -r results/**/*
-if [ -d "outputs" ]; then
-  rm -r outputs/*
-fi
+#if [ -d "outputs" ]; then
+#  rm -r outputs/*
+#fi
 lines=$(wc -l < job_list.txt)
 echo "Number of jobs: $lines"
 export LC_ALL=C

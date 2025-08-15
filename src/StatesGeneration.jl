@@ -95,8 +95,8 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
             if param.log_level > 0
                 print("iteration: $(iter),  #states: $(length(detector.purestates)), valueb: $(valueb), activeness: $(cutactiveness), primalobj: $(primalobj), dualobj: $(dualobj)\n")
             end
-            if param.maxrounds >=0 && nlmocall >= min(param.maxrounds, 2 * detector.dimH * detector.dimH + 1 )
-                print("max rounds reached\n")
+            if param.maxrounds >=0 && !param.is_last && nlmocall >= min(param.maxrounds, 2 * detector.dimH * detector.dimH + 1 )
+                print("max rounds reached and not in last state generation\n")
                 break
             end
             if terminate || masterconverge
