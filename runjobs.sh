@@ -11,4 +11,8 @@ export MOSEKHOME="/software/mosek/10.2"
 export MOSEKLM_LICENSE_FILE=27007@solice01.zib.de
 julia --project=.  -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
-sbatch --array=0-$(($lines - 1)) run.slurm
+total_lines=$(wc -l < job_list.txt)
+
+for ((i = 1; i <= total_lines; i++)); do
+    sbatch run.slurm $i
+done
