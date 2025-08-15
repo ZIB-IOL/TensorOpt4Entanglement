@@ -85,7 +85,7 @@ function runEntangle(args)
         param.maxeffortnnodes = 70
         param.heur_alternate_iter = 10
         param.heur_alternate1_iter = 15
-        heur_alternate_maxfail = 1
+        param.heur_alternate_maxfail = 1
     elseif nsubs == 4
         param.time_limit = param.time_limit < 0 ? 7200 : param.time_limit
         param.pointsize_bound =  512 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
@@ -100,7 +100,7 @@ function runEntangle(args)
         param.maxeffortnnodes = 50
         param.heur_alternate_iter = 10
         param.heur_alternate1_iter = 15
-        heur_alternate_maxfail = 1
+        param.heur_alternate_maxfail = 1
     elseif nsubs == 5
         param.time_limit = param.time_limit < 0 ? 10800 : param.time_limit
         param.pointsize_bound = 1096 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
@@ -115,7 +115,7 @@ function runEntangle(args)
         param.maxeffortnnodes = 15
         param.heur_alternate_iter = 4
         param.heur_alternate1_iter = 8
-        heur_alternate_maxfail = 1
+        param.heur_alternate_maxfail = 1
     elseif nsubs == 6
         param.time_limit = 10800
         param.pointsize_bound =  150 #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
