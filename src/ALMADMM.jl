@@ -443,7 +443,7 @@ function SetXvals(substates, weights, nrank1, sumdim, dims, cdims, nsubs)
     return p, nrank1_
 end
 
-function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param, is_escaping = false, is_high_accuracy = false)
+function ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param, is_escaping = false, is_high_accuracy = false)
     #Test()
     obj_tol = param.heur_LADMM_obj_tol * ( is_high_accuracy ? 0.1 : 1)
     step_tol = param.heur_LADMM_step_tol * ( is_high_accuracy ? 0.1 : 1)
@@ -502,7 +502,8 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
     maxmanoptiter = min( is_escaping ? param.heur_MANOPT1_maxiter : param.heur_MANOPT_maxiter, dimH * dimH *2 +1)
     maxmanoptiter *= is_high_accuracy ? 2 : 1
     record = [:Iteration]
-    for i in 1:maxiter  # adjust number of iterations as needed
+    i = 1
+    while true  # adjust number of iterations as needed
 
         # update manifold
         myf, mygrad_f, func, _, grad_l_closure = make_objective_closures(M, Mdir_c, Min_c, multipliers_c, rho, z, indexmap)
@@ -568,15 +569,31 @@ function ALMADMMSolve(dims::Vector{Int64}, H, substates, weights, z, multipliers
 
         # check convergence
         feas_tol = obj_tol
+        needbreak = false
         print("cur_pen: ", cur_pen, " < ", feas_tol, ", norm_vgl: ", norm_vgl, "<", min_gd_tol, "\n")
         if cur_pen < feas_tol && norm_vgl < min_gd_tol
-            break
+            neebreak = true
         end
 
         # check time
         if is_time_limit_exceeded(param)
             println("Time limit exceeded, exiting...")
+            needbreak = true
+        end
+
+        i += 1
+
+        if i > maxiter
+            needbreak = true
+        end
+
+        if needbreak
             break
+        end
+
+        if param.lazification && false
+            purestates_, substates_, _ = GetXvals_ADMM(pX, nrank1, sumdim, dims, cdims, nsubs)
+            addBatchStates(detector, purestates_, substates_, param.lazification)
         end
     end
 

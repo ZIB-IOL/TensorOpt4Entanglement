@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set variables
 timelimit=-1
-algorithms=("LDL") #("LDL" "D" "A" "LD1")
+algorithms=("LDL" "D") #("LDL" "D" "A" "LD1")
 datapath="$PWD/benchmark"
 resultpath="$PWD/results"
 juliabin="julia" #"/home/lxu/software/julia-1.10.2/bin/julia"

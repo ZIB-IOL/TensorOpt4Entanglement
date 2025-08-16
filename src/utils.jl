@@ -86,12 +86,19 @@ function is_time_limit_last(param::Param)
    elapsed = get_elapsed_time(param)
    println("Elapsed time: $elapsed seconds, Time limit: $(param.time_limit) seconds $(param.is_last)")
    tratio = 1 - param.tratio
-   if !param.is_last &&  elapsed > tratio * param.time_limit
-      # give enough time for the last round
-      param.time_limit += elapsed - tratio * param.time_limit
-      param.is_last = true
+   if !param.is_last && elapsed > tratio * param.time_limit
+      return true
    end
-   return param.is_last
+   return false
+end
+
+function increase_last_time_limit(param::Param)
+   elapsed = get_elapsed_time(param)
+   tratio = 1 - param.tratio
+   new_time_limit = param.time_limit + max(elapsed - tratio * param.time_limit, 0)
+   println("increas time limit, Time limit: $(param.time_limit) new time limit: $new_time_limit seconds")
+   param.is_last = true
+   param.time_limit = new_time_limit
 end
 
 function reset_timer!(param::Param)

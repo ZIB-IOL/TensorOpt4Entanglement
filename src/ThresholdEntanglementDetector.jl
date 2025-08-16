@@ -208,7 +208,7 @@ function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix
         # normalize the weights
         weights ./= sum(weights)
 
-        purestates, substates, approxub, approxfeas = ALMADMMSolve(dims, HR + im * HI, substates, weights, 1 - ub, multipliers, param, i == 1, singlerun)
+        purestates, substates, approxub, approxfeas = ALMADMMSolve(detector, dims, HR + im * HI, substates, weights, 1 - ub, multipliers, param, i == 1, singlerun)
 
         # get the nonzero weights and substates
         clearStates(detector, clearall)

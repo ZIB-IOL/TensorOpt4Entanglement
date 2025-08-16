@@ -113,7 +113,7 @@ function runEntangle(args)
         param.heur_LADMM_maxiter = 4
         param.heur_LADMM1_maxiter = 8
         param.heur_LADMM_rho = 10
-        param.maxnnodes = 0
+        param.maxnnodes = 1
         param.maxeffortnnodes = 15
         param.heur_alternate_iter = 4
         param.heur_alternate1_iter = 8

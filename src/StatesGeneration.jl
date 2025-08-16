@@ -19,13 +19,26 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
     terminate = false
     while true
         primalobjprev = primalobj
+        # check time limit
         is_time_limit_exceeded(param)
+        # check is the last period
+        islast = param.is_last
+        needincrease = false
+        if !islast && is_time_limit_last(param)
+            println("Time limit is almost reached")
+            needincrease = true
+            if param.lazification
+                poolAdd(detector, param)
+            end
+        end
         print("solve--\n")
-        #print(length(detector.poolpurestates), length(detector.poolsubstates), length(detector.poolstats))
-        #@assert( length(detector.cuts) == length(detector.substates) )
         status, solverstatus, primalobj, _ = solveMSK(detector.model, param, false)
         print("end solve-- $status $solverstatus\n")
         is_time_limit_exceeded(param)
+        if needincrease
+            increase_last_time_limit(param)
+            islast = true
+        end
         if status == RelaxOptimal || status == RelaxFeasible
             Mout[:RE] = value.(detector.M[:RE])
             Mout[:IM] = value.(detector.M[:IM])
@@ -43,61 +56,17 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
             separateproblem.Hout = Mout
             separateproblem.cutoffbound = valueb
             itereffortlevel = 0
-            if effortlevel == 1
-                itereffortlevel = iter == param.maxrounds ? 1 : 0
-            elseif effortlevel == 2
-                if iter == param.maxrounds
-                    itereffortlevel = 2
-                else
-                    itereffortlevel = 1
-                end
-            end
-            if abs(primalobjprev - primalobj) < param.master_obj_tol
-                fails += 1
-            else
-                fails = 0
-            end
-            terminate = false
-            masterconverge = false
-            if fails >= maxfail
-                masterconverge = true
-                print("master converge\n")
+            if islast
                 itereffortlevel = 2
             end
-            print("itereffortlevel: $(itereffortlevel)\n")
-            needsglobalobbt = false && iter >= 5 * param.freq_globalobbt && iter % param.freq_globalobbt == 0 && itereffortlevel == 2
             if is_time_limit_exceeded(param)
-                println("Time limit exceeded, exiting...")
                 break
             end
-            islast = param.is_last
-            if is_time_limit_last(param)
-                println("Time limit is almost reached")
-                itereffortlevel = 2
-            end
-            lmocall = false
-            if param.lazification
-                updatePoolStats(detector, param)
-                if !islast && param.is_last
-                    poolAdd(detector, param)
-                end
-            end
-            if param.lazification && nlazyfound <= poolsize && false  # nlazycall < param.pool_size
-                addstate, violation = searchFilterCons(detector, poolsize, param)
-                nlazycall += 1
-                if addstate
-                    print("iteration: $(iter),  add state by lazification: $(violation),  primalobj: $(primalobj)\n")
-                    iter += 1
-                    nlazyfound += 1
-                    continue
-                else
-                    lmocall = true
-                end
-            else
-                lmocall = true
-            end
+            print("itereffortlevel: $(itereffortlevel)\n")
+            terminate = false
+            lmocall = true
             if lmocall
-                cutactiveness, cutdualactiveness, state, Xvals = separate!(separateproblem, param, itereffortlevel, needsglobalobbt)
+                cutactiveness, cutdualactiveness, state, Xvals = separate!(separateproblem, param, itereffortlevel, false)
                 terminate, addstate, newdualobj = checkTerminationGap(detector, primalobj, cutactiveness, cutdualactiveness, valueb, dualobj, param)
                 dualobj = max(newdualobj, dualobj)
                 nlmocall += 1
@@ -128,7 +97,12 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
             break
         end
     end
-    check(detector.substates, detector.dims)
+    #check(detector.substates, detector.dims)
+    if param.lazification
+        detector.poolpurestates = []
+        detector.poolsubstates = []
+        detector.poolstats = []
+    end
     return primalobj, dualobj, terminate, detector.purestates, detector.substates, weights, Mout, weghts_sum
 end
 
