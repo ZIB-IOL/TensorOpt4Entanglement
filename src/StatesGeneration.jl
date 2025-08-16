@@ -19,10 +19,13 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
     terminate = false
     while true
         primalobjprev = primalobj
+        is_time_limit_exceeded(param)
         print("solve--\n")
+        #print(length(detector.poolpurestates), length(detector.poolsubstates), length(detector.poolstats))
         #@assert( length(detector.cuts) == length(detector.substates) )
         status, solverstatus, primalobj, _ = solveMSK(detector.model, param, false)
         print("end solve-- $status $solverstatus\n")
+        is_time_limit_exceeded(param)
         if status == RelaxOptimal || status == RelaxFeasible
             Mout[:RE] = value.(detector.M[:RE])
             Mout[:IM] = value.(detector.M[:IM])
@@ -67,12 +70,19 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
                 println("Time limit exceeded, exiting...")
                 break
             end
+            islast = param.is_last
             if is_time_limit_last(param)
                 println("Time limit is almost reached")
                 itereffortlevel = 2
             end
             lmocall = false
-            if param.lazification && nlazyfound <= poolsize  # nlazycall < param.pool_size
+            if param.lazification
+                updatePoolStats(detector, param)
+                if !islast && param.is_last
+                    poolAdd(detector, param)
+                end
+            end
+            if param.lazification && nlazyfound <= poolsize && false  # nlazycall < param.pool_size
                 addstate, violation = searchFilterCons(detector, poolsize, param)
                 nlazycall += 1
                 if addstate

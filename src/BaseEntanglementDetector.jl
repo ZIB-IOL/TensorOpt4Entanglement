@@ -94,13 +94,28 @@ function addCons(detector::AbstractEntanglementDetector, state)
     push!(detector.cuts, cons)
 end
 
+function updatePoolStats(detector::AbstractEntanglementDetector, param::Param)
+    for (ind, state) in enumerate(detector.poolpurestates)
+        violation = value(dot(detector.M[:RE], real(state)) + dot(detector.M[:IM], imag(state)) - detector.b)
+        detector.poolstats[ind] = 0.5 * detector.poolstats[ind] + violation
+    end
+end
+
+function poolAdd(detector::AbstractEntanglementDetector, param::Param)
+    for (ind, state) in enumerate(detector.poolpurestates)
+        if detector.poolstats[ind] > 0 && detector.poolstats[ind] < detector.round
+            addCons(detector, detector.poolpurestates[ind])
+            push!(detector.substates, detector.poolsubstates[ind])
+            push!(detector.purestates, detector.poolpurestates[ind])
+            push!(detector.ispersistent, false)
+        end
+    end
+end
+
 function searchFilterCons(detector::AbstractEntanglementDetector, poolsize, param::Param)
     bestviolation = 1e-6
     beststateind = -1
     for (ind, state) in enumerate(detector.poolpurestates)
-        if ind > poolsize
-            #break
-        end
         violation = value(dot(detector.M[:RE], real(state)) + dot(detector.M[:IM], imag(state)) - detector.b)
         if violation >= bestviolation
             beststateind = ind
@@ -148,6 +163,7 @@ function addRank1PrincipleState(detector::AbstractEntanglementDetector, Xvals, M
         if addtoPool
             push!(detector.poolpurestates, state)
             push!(detector.poolsubstates, substates)
+            push!(detector.poolstats, detector.round)
         end
     elseif dot(Mout[:RE], real(state)) + dot(Mout[:IM], imag(state)) > valueb
         push!(detector.substates, substates)
@@ -156,6 +172,7 @@ function addRank1PrincipleState(detector::AbstractEntanglementDetector, Xvals, M
         if addtoPool
             push!(detector.poolpurestates, state)
             push!(detector.poolsubstates, substates)
+            push!(detector.poolstats, detector.round)
         end
         addCons(detector, state)
     end
@@ -203,6 +220,7 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
             if addtoPool
                 push!(detector.poolpurestates, state)
                 push!(detector.poolsubstates, substates)
+                push!(detector.poolstats, detector.round)
             end
         elseif dot(Mout[:RE], real(state)) + dot(Mout[:IM], imag(state)) > valueb
             ct += 1
@@ -213,6 +231,7 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
             if addtoPool
                 push!(detector.poolpurestates, state)
                 push!(detector.poolsubstates, substates)
+                push!(detector.poolstats, detector.round)
             end
             addCons(detector, state)
         end

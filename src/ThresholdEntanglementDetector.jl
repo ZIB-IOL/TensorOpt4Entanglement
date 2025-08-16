@@ -18,6 +18,8 @@ mutable struct ThresholdEntanglementDetector <: AbstractEntanglementDetector
     ispersistent
     poolpurestates
     poolsubstates
+    poolstats
+    round
     function ThresholdEntanglementDetector(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, purestates, substates)
         dimH = reduce(*, dims)
         nsubs = length(dims)
@@ -34,6 +36,8 @@ mutable struct ThresholdEntanglementDetector <: AbstractEntanglementDetector
         detector.poolpurestates = []
         detector.poolsubstates = []
         detector.ispersistent = []
+        detector.poolstats = []
+        detector.round = 0
         return detector
     end
 end
@@ -42,9 +46,11 @@ function addBatchStates(detector::ThresholdEntanglementDetector, purestates, sub
     append!(detector.purestates, purestates)
     append!(detector.substates, substates)
     append!(detector.ispersistent, [false] * length(purestates))
+
     if addtoPool
         append!(detector.poolpurestates, purestates)
         append!(detector.poolsubstates, substates)
+        append!(detector.poolstats, fill(detector.round, length(purestates)))
     end
 end
 
@@ -169,12 +175,14 @@ function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix
     detector = ThresholdEntanglementDetector(HR, HI, dims, [], [])
 
     # add the identity state
-    identitystate =  Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
-    addRank1State(detector, identitystate, nothing, nothing, true, param.lazification, param.pointsize_bound)
+    identitystate = Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
+    addRank1State(detector, identitystate, nothing, nothing, true, false, param.pointsize_bound)
+
     npersistent = length(detector.substates)
     # add more states to match the point size bound
     purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
-    addBatchStates(detector, purestates_, substates_, param.lazification)
+    addBatchStates(detector, purestates_, substates_, false)
+
     ncomplementpoints = length(detector.substates) - npersistent
     # assign weights
     weights = vcat([2.0 / (2 * npersistent + ncomplementpoints) for _ in 1:npersistent], [1.0 / (2 * npersistent + ncomplementpoints) for _ in 1:ncomplementpoints])
@@ -187,6 +195,7 @@ function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix
     for i in 1:maxi
         println("Lifting-discretization iteration: $i / $(param.loop)")
         # sort the weights in descending order
+        detector.round =  2 * i - 1
         sorted_weights = sort(weights, rev=true)
         sorted_indices = sortperm(weights, rev=true)
         # get sorted substates
@@ -203,9 +212,12 @@ function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix
 
         # get the nonzero weights and substates
         clearStates(detector, clearall)
-        addBatchStates(detector, purestates, substates, param.lazification)
-        addBatchStates(detector, nz_purestates, nz_substates)
 
+        addBatchStates(detector, purestates, substates, param.lazification)
+
+        addBatchStates(detector, nz_purestates, nz_substates, false)
+
+        detector.round =  2 * i
         # get the lower and upper bounds
         ub, lb, terminate, purestates, substates, weights, multipliers, weights_sum = cuttingPlane(detector, separateproblem, param, 1, singlerun)
         glbub = min(glbub, ub)
@@ -247,7 +259,6 @@ end
 
 function detectEntanglementThresholdDiscrete(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     #purestates = getPureStates(HR, HI, dims, param)
-    param.lazification = false
     separateproblem = Problem(HR, HI, dims)
     dimH = separateproblem.dimH
     nsubs = length(dims)
@@ -259,11 +270,11 @@ function detectEntanglementThresholdDiscrete(HR::Matrix{Float64}, HI::Matrix{Flo
 
     # add the identity state
     identitystate =  Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
-    addRank1State(detector, identitystate, nothing, nothing, true, param.lazification, param.pointsize_bound)
+    addRank1State(detector, identitystate, nothing, nothing, true, false, param.pointsize_bound)
     npersistent = length(detector.substates)
     # add more states to match the point size bound
     purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
-    addBatchStates(detector, purestates_, substates_, param.lazification)
+    addBatchStates(detector, purestates_, substates_, false)
 
 
     # get the lower and upper bounds
@@ -275,7 +286,6 @@ end
 
 function detectEntanglementThresholdAlternate(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     #purestates = getPureStates(HR, HI, dims, param)
-    param.lazification = false
     separateproblem = Problem(HR, HI, dims)
     dimH = separateproblem.dimH
     nsubs = length(dims)
@@ -287,11 +297,11 @@ function detectEntanglementThresholdAlternate(HR::Matrix{Float64}, HI::Matrix{Fl
 
     # add the identity state
     identitystate =  Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
-    addRank1State(detector, identitystate, nothing, nothing, true, param.lazification, param.pointsize_bound)
+    addRank1State(detector, identitystate, nothing, nothing, true, false, param.pointsize_bound)
     npersistent = length(detector.substates)
     # add more states to match the point size bound
     purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
-    addBatchStates(detector, purestates_, substates_, param.lazification)
+    addBatchStates(detector, purestates_, substates_, false)
     weights  = ones(length(detector.substates)) / length(detector.substates)
     # get the lower and upper bounds
     ub, purestates, substates = alternateSolve(dims, HR + im * HI, detector.purestates, detector.substates, weights, param)
@@ -349,11 +359,11 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
 
     # add the identity state
     identitystate =  Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
-    addRank1State(detector, identitystate, nothing, nothing, true, param.lazification, param.pointsize_bound)
+    addRank1State(detector, identitystate, nothing, nothing, true, false, param.pointsize_bound)
     npersistent = length(detector.substates)
     # add more states to match the point size bound
     purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
-    addBatchStates(detector, purestates_, substates_, param.lazification)
+    addBatchStates(detector, purestates_, substates_, false)
     ncomplementpoints = length(detector.substates) - npersistent
     # assign weights
     weights = vcat([2.0 / (2 * npersistent + ncomplementpoints) for _ in 1:npersistent], [1.0 / (2 * npersistent + ncomplementpoints) for _ in 1:ncomplementpoints])

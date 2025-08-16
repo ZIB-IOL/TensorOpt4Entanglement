@@ -1,7 +1,7 @@
 #!/bin/bash
 # Set variables
 timelimit=-1
-algorithms=("LDL" "D") #("LDL" "D" "A" "LD1")
+algorithms=("LDL") #("LDL" "D" "A" "LD1")
 datapath="$PWD/benchmark"
 resultpath="$PWD/results"
 juliabin="julia" #"/home/lxu/software/julia-1.10.2/bin/julia"
@@ -13,9 +13,9 @@ for instance in $(ls $datapath)
 do
   for algorithm in "${algorithms[@]}"
   do
-      if ! grep -q "N = 5" "$datapath/$instance"; then
-        continue
-      fi
+      #if ! grep -q "N = 5" "$datapath/$instance"; then
+      #  continue
+      #fi
       echo  "-s" "$instance" "-a" "$algorithm" "-t" "$timelimit"
       echo "$instance" "$algorithm" "$timelimit">> job_list.txt
   done
