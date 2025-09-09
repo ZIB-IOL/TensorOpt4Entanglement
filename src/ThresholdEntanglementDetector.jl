@@ -72,7 +72,7 @@ end
 
 function normalizationCondition(detector::ThresholdEntanglementDetector, param)
     # normalization condition
-    @constraint(detector.model, dot(detector.M[:RE], detector.H[:RE] - Diagonal(ones(detector.dimH) / detector.dimH)) + dot(detector.M[:IM], detector.H[:IM]) <= 1 )
+    @constraint(detector.model, dot(detector.M[:RE], detector.H[:RE] - Diagonal(ones(detector.dimH) / detector.dimH)) + dot(detector.M[:IM], detector.H[:IM]) == 1 )
 end
 
 

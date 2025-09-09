@@ -113,13 +113,13 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
          if stateseparator.param.log_level > 0
             print("--no leaves, terminated\n")
          end
-         return  stateseparator.primalbd, stateseparator.primalbd, stateseparator.primalHbar, stateseparator.primalsol
+         return  stateseparator.primalbd, stateseparator.dualbd, stateseparator.primalHbar, stateseparator.primalsol
       # the whole tree is pruned
-      elseif  abs(stateseparator.dualbd - stateseparator.primalbd) < param.obj_tol || abs(stateseparator.dualbd - stateseparator.primalbd) / max(abs(stateseparator.dualbd), abs(stateseparator.primalbd)) < param.rel_obj_tol
+      elseif  abs(stateseparator.dualbd - stateseparator.primalbd) < param.obj_tol
          if stateseparator.param.log_level > 0
-            print("--gap closed, terminated $(stateseparator.dualbd) $(stateseparator.primalbd)  \n")
+            print("--gap closed, terminated dualbd: $(stateseparator.dualbd) primalbd: $(stateseparator.primalbd)  \n")
          end
-         return  stateseparator.primalbd, stateseparator.primalbd, stateseparator.primalHbar, stateseparator.primalsol
+         return  stateseparator.primalbd, stateseparator.dualbd, stateseparator.primalHbar, stateseparator.primalsol
       elseif effortlevel < 2 && stateseparator.primaloutbd > stateseparator.cutoffbound
          if stateseparator.param.log_level > 0 && nnodes >= param.minnnodes
             print("--early stop, find a state\n")
