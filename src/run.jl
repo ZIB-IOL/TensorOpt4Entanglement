@@ -135,7 +135,7 @@ function runEntangle(args)
             glbub, glblb, approxub, approxfeas, approxweights =  detectEntanglementThresholdLiftDual(HR, HI, dims, param)
         elseif args["algo"] == "LDL"
             param.pool_size = -1
-            param.lazification = trues
+            param.lazification = true
             glbub, glblb, approxub, approxfeas, approxweights =  detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         elseif args["algo"] == "D"
             param.maxrounds = -1
