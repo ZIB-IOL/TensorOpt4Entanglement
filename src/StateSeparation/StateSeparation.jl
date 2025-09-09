@@ -117,7 +117,7 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
       # the whole tree is pruned
       elseif  abs(stateseparator.dualbd - stateseparator.primalbd) < param.obj_tol || abs(stateseparator.dualbd - stateseparator.primalbd) / max(abs(stateseparator.dualbd), abs(stateseparator.primalbd)) < param.rel_obj_tol
          if stateseparator.param.log_level > 0
-            print("--gap closed, terminated\n")
+            print("--gap closed, terminated $(stateseparator.dualbd) $(stateseparator.primalbd)  \n")
          end
          return  stateseparator.primalbd, stateseparator.primalbd, stateseparator.primalHbar, stateseparator.primalsol
       elseif effortlevel < 2 && stateseparator.primaloutbd > stateseparator.cutoffbound

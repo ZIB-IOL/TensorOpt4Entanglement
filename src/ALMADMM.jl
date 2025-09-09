@@ -166,13 +166,13 @@ function fasttrace(M::LiftModel, p)
     return trace
 end
 
-function projtangent!(M, rg, p, g)
+function projtangent!(M::LiftModel, rg, p, g)
     gtr = gradient(p ->trace(M, p), p)[1]
     rg .= g - dot(gtr, g) / dot(gtr, gtr) * gtr
     return rg
 end
 
-function fastprojtangent!(M, rg, p, g)
+function fastprojtangent!(M::LiftModel, rg, p, g)
 
     normsquare, normsquareprod = vecNormSquare(M, p)
     nrank1 = M.nrank1

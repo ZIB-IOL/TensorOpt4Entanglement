@@ -37,6 +37,7 @@ module ExactEntanglement
    include("ALMADMM.jl")
    include("AlternateOpt.jl")
    include("ALM.jl")
+   include("DualALM.jl")
    include("run.jl")
    export Param
    export detectEntanglementThresholdLiftDiscrete, detectEntanglementThresholdDiscretem, detectEntanglementThresholdHybridSingle

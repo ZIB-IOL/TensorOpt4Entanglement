@@ -437,3 +437,78 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
 
     return glbub, glblb, glbub, 0.0, approxweights
 end
+
+
+function detectEntanglementThresholdLiftDual(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+    #purestates = getPureStates(HR, HI, dims, param)
+    singlerun = false
+    clearall = false
+    if param.loop == -1
+        maxi = 10000000
+    elseif param.loop == -2
+        maxi = 1
+        singlerun = true
+        clearall = true
+    elseif param.loop == -3
+        maxi = 1
+        singlerun = true
+    else
+        maxi = param.loop
+    end
+
+    # create the separate problem
+    separateproblem = Problem(HR, HI, dims)
+    dimH = separateproblem.dimH
+    nsubs = length(dims)
+
+    # set data
+    multipliers = 1.0
+    ub = 0.5
+    glbub = Inf
+    glblb = -Inf
+    approxub = 1.0
+    approxfeas = 0.0
+    approxweights = 0.0
+
+    nz_purestates = []
+    nz_substates = []
+    nz_weights = []
+
+    # create the detector
+    detector = ThresholdEntanglementDetector(HR, HI, dims, [], [])
+
+    # add the identity state
+    identitystate = Dict(:RE=> [ Matrix(Diagonal(ones(dim))) / dimH for dim in dims], :IM=> [zeros(dim, dim)  for dim in dims])
+    addRank1State(detector, identitystate, nothing, nothing, true, false, param.pointsize_bound)
+
+    npersistent = length(detector.substates)
+    # add more states to match the point size bound
+
+    purestates_, substates_ = complementStates(dims, param.pointsize_bound, length(detector.substates))
+    addBatchStates(detector, purestates_, substates_, false)
+
+    ncomplementpoints = length(detector.substates) - npersistent
+    # assign weights
+    weights = vcat([2.0 / (2 * npersistent + ncomplementpoints) for _ in 1:npersistent], [1.0 / (2 * npersistent + ncomplementpoints) for _ in 1:ncomplementpoints])
+    @assert length(weights) == length(detector.substates) "Weights and substates must have the same length $(length(weights)) != $(length(detector.substates))"
+
+    nnz = max(param.pointsize_bound - param.rank_bound, 0)
+    nz_purestates = detector.purestates[end - nnz:end]
+    nz_substates = detector.substates[end - nnz:end]
+
+    sorted_weights = sort(weights, rev=true)
+    sorted_indices = sortperm(weights, rev=true)
+    # get sorted substates
+    sorted_substates = detector.substates[sorted_indices]
+    nfactor = min(length(sorted_weights), param.rank_bound)
+    # get the top nfactor substates and weights
+    weights = sorted_weights[1:nfactor]
+    substates = sorted_substates[1:nfactor]
+    # get the nonzero substates
+    # normalize the weights
+    weights ./= sum(weights)
+
+    purestates, substates, approxlb, approxfeas = dualALMSolve(detector, dims, HR + im * HI, substates, weights, multipliers, param, true, singlerun)
+
+    return 0, 0, approxlb, approxfeas, 0.0
+end

@@ -1,5 +1,5 @@
 import os
-
+import math
 class ExperimentInstance:
     def __init__(self, filename: str, name: str, statetype: str, nsubs: int, dimH: int):
         self.filename = filename
@@ -76,12 +76,13 @@ instances = load_benchmarks(benchmark_dir)
 results_dir = os.path.join(os.getcwd(), 'results')
 results = load_results(results_dir)
 
-algos = ["A", "LD1", "D", "LDL"]
+algos = ["A", "LD1", "D", "LDL", "PPT"]
 algonames = {
     "A": "Alternating",
     "LD1": "LADMM",
     "D": "Discretization",
-    "LDL": "Lifting-Discretization"
+    "LDL": "Lifting-Discretization",
+    "PPT": "DPS"
 }
 instance_results = {}
 
@@ -97,9 +98,11 @@ for instance in instances:
         found = False
         for result in instance_results[instance.filename]:
             if result.algo == algo:
+                glbub_str = '-' if result.glbub == 0.0 else f'{result.glbub:.5f}'
+                glblb_str = '-' if not math.isfinite(result.glblb)  else f'{result.glblb:.5f}'
                 approxub_str = '-' if result.approxfeas == 0.0 else f'{result.approxub:.5f}'
                 approxfeas_str = '-' if result.approxfeas == 0.0 else f'{result.approxfeas:.5f}'
-                printoutstr += f"& {algonames[algo]} & {result.glbub:.5f} & {result.glblb:.5f} & {approxub_str} & {approxfeas_str} & {int(result.time)} \\\\ \n "
+                printoutstr += f"& {algonames[algo]} & {glbub_str} & {glblb_str} & {approxub_str} & {approxfeas_str} & {int(result.time)} \\\\ \n "
                 found = True
                 break
         if not found:

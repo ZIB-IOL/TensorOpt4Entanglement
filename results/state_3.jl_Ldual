@@ -1,0 +1,8 @@
+instance: state_3.jl
+algo: Ldual
+glbub: Inf
+approxub: Inf
+approxfeas: 0.0
+glblb: -Inf
+approxweights: 0
+time: 7.774e-6
