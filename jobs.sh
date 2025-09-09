@@ -4,7 +4,7 @@ timelimit=-1
 algorithms=("D") #("LDL" "D" "A" "LD1")
 datapath="$PWD/benchmark"
 resultpath="$PWD/results"
-juliabin="julia" #"/home/lxu/software/julia-1.10.2/bin/julia"
+juliabin="/home/htc/lxu/.julia/juliaup/julia-1.11.4+0.x64.linux.gnu/bin/julia" #"/home/lxu/software/julia-1.10.2/bin/julia"
 
 
 # Generate all job combinations and save to file
@@ -17,7 +17,7 @@ do
         continue
       fi
       echo  "-s" "$instance" "-a" "$algorithm" "-t" "$timelimit"
-      echo "$instance" "$algorithm" "$timelimit">> job_list.txt
+      echo "$juliabin" "$instance" "$algorithm" "$timelimit">> job_list.txt
   done
 done
 

@@ -9,7 +9,7 @@ export LC_ALL=C
 export JULIA_DEPOT_PATH=".julia_depot"
 export MOSEKHOME="/software/mosek/10.2"
 export MOSEKLM_LICENSE_FILE=27007@solice01.zib.de
-julia --project=.  -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+/home/htc/lxu/.julia/juliaup/julia-1.11.4+0.x64.linux.gnu/bin/julia --project=.  -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
 total_lines=$(wc -l < job_list.txt)
 

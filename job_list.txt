@@ -1,22 +1,3 @@
-state_0.jl LDL -1
-state_0.jl D -1
-state_033.jl LDL -1
-state_033.jl D -1
-state_1.jl LDL -1
-state_1.jl D -1
-state_10.jl LDL -1
-state_10.jl D -1
-state_11.jl LDL -1
-state_11.jl D -1
-state_12.jl LDL -1
-state_12.jl D -1
-state_13.jl LDL -1
-state_13.jl D -1
-state_133.jl LDL -1
-state_133.jl D -1
-state_2.jl LDL -1
-state_2.jl D -1
-state_233.jl LDL -1
-state_233.jl D -1
-state_3.jl LDL -1
-state_3.jl D -1
+/home/htc/lxu/.julia/juliaup/julia-1.11.4+0.x64.linux.gnu/bin/julia state_033.jl D -1
+/home/htc/lxu/.julia/juliaup/julia-1.11.4+0.x64.linux.gnu/bin/julia state_133.jl D -1
+/home/htc/lxu/.julia/juliaup/julia-1.11.4+0.x64.linux.gnu/bin/julia state_233.jl D -1

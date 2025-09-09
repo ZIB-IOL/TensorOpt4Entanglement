@@ -1,8 +1,8 @@
 instance: state_133.jl
 algo: D
-glbub: 0.8225146506180474
-approxub: 0.8225146506180474
+glbub: 0.8224953777977839
+approxub: 0.8224953777977839
 approxfeas: 0.0
 glblb: 0.6128169066442511
 approxweights: 0
-time: 3607.308361506
+time: 3601.991003767
