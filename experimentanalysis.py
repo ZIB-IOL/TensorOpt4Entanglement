@@ -78,10 +78,10 @@ results = load_results(results_dir)
 
 algos = ["A", "LD1", "D", "LDL", "PPT"]
 algonames = {
-    "A": "Alternating",
+    "A": "Alt-SDP",
     "LD1": "LADMM",
-    "D": "Discretization",
-    "LDL": "Lifting-Discretization",
+    "D": "CP",
+    "LDL": "IR",
     "PPT": "DPS"
 }
 instance_results = {}

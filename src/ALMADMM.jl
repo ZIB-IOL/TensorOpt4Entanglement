@@ -572,7 +572,7 @@ function ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, m
         needbreak = false
         print("cur_pen: ", cur_pen, " < ", feas_tol, ", norm_vgl: ", norm_vgl, "<", min_gd_tol, "\n")
         if cur_pen < feas_tol && norm_vgl < min_gd_tol
-            neebreak = true
+            needbreak = true
         end
 
         # check time
