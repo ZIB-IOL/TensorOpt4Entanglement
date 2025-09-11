@@ -9,7 +9,7 @@ class ExperimentInstance:
         self.dimH = dimH
 
 class ExperimentResult:
-    def __init__(self, instance: str, algo: str, glbub: float, approxub: float, glblb: float, approxweights: float, approxfeas: float, time: float):
+    def __init__(self, instance: str, algo: str, glbub: float, approxub: float, glblb: float, approxweights: float, approxfeas: float, time: float, result_path):
         self.instance = instance
         self.algo = algo
         self.glbub = glbub
@@ -18,6 +18,7 @@ class ExperimentResult:
         self.approxweights = approxweights
         self.approxfeas = approxfeas
         self.time = time
+        self.result_path = result_path
 
 
 def load_benchmarks(benchmark_dir):
@@ -42,6 +43,11 @@ def load_benchmarks(benchmark_dir):
 def load_results(result_dir):
     results = []
     for result_file in os.listdir(results_dir):
+        # skip the 'outputs' folder and any directories
+        if result_file == 'outputs':
+            continue
+        if os.path.isdir(os.path.join(results_dir, result_file)):
+            continue
         result_path = os.path.join(results_dir, result_file)
         with open(result_path, 'r') as f:
             lines = f.readlines()
@@ -66,7 +72,7 @@ def load_results(result_dir):
                     algo = line.split(':')[1].strip()
                 elif line.startswith('instance'):
                     instance = line.split(':')[1].strip()
-            result = ExperimentResult(instance, algo, glbub, approxub, glblb, approxweights, approxfeas, time)
+            result = ExperimentResult(instance, algo, glbub, approxub, glblb, approxweights, approxfeas, time, result_path)
             results.append(result)
     return results
 
