@@ -117,13 +117,14 @@ for instance in instances:
 print("\\bottomrule")
 
 
-rank_algos = ["LDR2", "LDR1", "LD1", "LDR3"]
+rank_algos = ["LD1", "LDR1",  "LDR2", "LDR3", "LDR4"]
 
 algonames = {
-    "LDR2": "LADMM\_396",
-    "LDR1": "LADMM\_524",
-    "LD1": "LADMM\_652",
-    "LDR3": "LADMM\_780"
+    "LD1": "LADMM\_400",
+    "LDR1": "LADMM\_500",
+    "LDR2": "LADMM\_600",
+    "LDR3": "LADMM\_700",
+    "LDR4": "LADMM\_800",
 }
 
 for instance in instances:
