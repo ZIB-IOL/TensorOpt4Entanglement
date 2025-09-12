@@ -106,17 +106,20 @@ function runEntangle(args)
     elseif nsubs == 5
         param.time_limit = param.time_limit < 0 ? 10800 : param.time_limit
         param.pointsize_bound = 1096 + 10  #min( 100 * (2 * sum(dims) + 1), 2 * prod(dims) + 1)
-        param.rank_bound =  652 + 10
-        param.maxrounds = 652 + 10
+        param.rank_bound =  400
+        param.maxrounds = 400
         if args["algo"] == "LDR1"
-            param.rank_bound =  524 + 10
-            param.maxrounds = 524 + 10
+            param.rank_bound =  500
+            param.maxrounds = 500
         elseif args["algo"] == "LDR2"
-            param.rank_bound =  396 + 10
-            param.maxrounds = 396 + 10
+            param.rank_bound =  600
+            param.maxrounds = 600
         elseif args["algo"] == "LDR3"
-            param.rank_bound =  780 + 10
-            param.maxrounds = 780 + 10
+            param.rank_bound =  700
+            param.maxrounds = 700
+        elseif args["algo"] == "LDR4"
+            param.rank_bound =  800
+            param.maxrounds = 800
         end
         param.heur_MANOPT_maxiter = 150
         param.heur_MANOPT1_maxiter = 200
@@ -179,6 +182,9 @@ function runEntangle(args)
             param.loop = -3
             glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         elseif args["algo"] == "LDR3"
+            param.loop = -3
+            glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
+        elseif args["algo"] == "LDR4"
             param.loop = -3
             glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
         end

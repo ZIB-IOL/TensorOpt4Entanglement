@@ -88,7 +88,7 @@ algonames = {
     "LD1": "LADMM",
     "D": "CP",
     "LDL": "IR",
-    "PPT": "DPS"
+    "PPT": "DPS",
 }
 instance_results = {}
 
@@ -101,6 +101,36 @@ for instance in instances:
             instance_results[instance.filename].append(result)
     printoutstr =  "\\midrule \n \\multirow{4}{*}{" + instance.name.replace('"', '').replace('_', '\_') + "} \n"
     for algo in algos:
+        found = False
+        for result in instance_results[instance.filename]:
+            if result.algo == algo:
+                glbub_str = '-' if result.glbub == 0.0 else f'{result.glbub:.5f}'
+                glblb_str = '-' if not math.isfinite(result.glblb)  else f'{result.glblb:.5f}'
+                approxub_str = '-' if result.approxfeas == 0.0 else f'{result.approxub:.5f}'
+                approxfeas_str = '-' if result.approxfeas == 0.0 else f'{result.approxfeas:.5f}'
+                printoutstr += f"& {algonames[algo]} & {glbub_str} & {glblb_str} & {approxub_str} & {approxfeas_str} & {int(result.time)} \\\\ \n "
+                found = True
+                break
+        if not found:
+            printoutstr += " & N/A & N/A & N/A & N/A & N/A \\\\ \n"
+    print(printoutstr)
+print("\\bottomrule")
+
+
+rank_algos = ["LDR2", "LDR1", "LD1", "LDR3"]
+
+algonames = {
+    "LDR2": "LADMM\_396",
+    "LDR1": "LADMM\_524",
+    "LD1": "LADMM\_652",
+    "LDR3": "LADMM\_780"
+}
+
+for instance in instances:
+    if instance.nsubs != 5:
+        continue
+    printoutstr =  "\\midrule \n \\multirow{4}{*}{" + instance.name.replace('"', '').replace('_', '\_') + "} \n"
+    for algo in rank_algos:
         found = False
         for result in instance_results[instance.filename]:
             if result.algo == algo:
