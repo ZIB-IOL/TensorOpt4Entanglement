@@ -1,8 +1,8 @@
 instance: state_10.jl
 algo: LDR1
-glbub: 0.9999999999952252
-approxub: 0.9412093306995359
-approxfeas: 3.2395749701966235e-5
+glbub: 0.9999997927880031
+approxub: 0.941162393327593
+approxfeas: 2.6833430050742276e-5
 glblb: -Inf
 approxweights: 0.0
-time: 10812.445120244
+time: 10812.446060948
