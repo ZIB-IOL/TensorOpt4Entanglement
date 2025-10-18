@@ -176,6 +176,12 @@ function runEntangle(args)
             approxub = 0
             approxfeas  = 0
             approxweights = 0
+        elseif args["algo"] == "RLT"
+            glblb = detectEntanglementThresholdRLT(HR, HI, dims, param)
+            glbub = 0
+            approxub = 0
+            approxfeas  = 0
+            approxweights = 0
         elseif args["algo"] == "LD0"
             param.loop = -2
             glbub, glblb, approxub, approxfeas, approxweights = detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)

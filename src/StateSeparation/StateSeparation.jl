@@ -28,7 +28,30 @@ function solveModel(optmodel::OptModel, BST, param::Param, silent = false, restr
    end
 end
 
+function threshold!(problem::Problem, param::Param, effortlevel = 0)
+   # create a StateSeparator problem data structure
+   print("--separating...\n")
+   stateseparator = StateSeparator(problem, param)
+   BST = problem.BST
 
+   # initial the node list
+   rootnode = creatRootNode(problem.dims, BST, problem.Zdims, param.feas_tol, problem.globalZBs, problem.fixvars)
+   stateseparatorAddNode!(stateseparator, rootnode)
+   stateseparator.selectnode = 1
+
+   focusnodeid = pop!(stateseparator.opennodes)
+   focusnode = stateseparatorGetNode(stateseparator, focusnodeid)
+   optmodel = initRelaxationThreshold(stateseparator, focusnode, true )
+
+   focusnode.localdualbd = Inf
+   status, solverstatus, sol = solveModel(optmodel, BST, stateseparator.param)
+   if isnothing(status) || !(status == RelaxFeasible || status == RelaxOptimal || status == RelaxInfeasible)
+      stateseparator.status = StateSeparatorNotFinished
+      print("nonvalid status ", solverstatus, " ", status, "\n")
+      return
+   end
+   return sol.dualobj
+end
 
 function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt = false)
    # create a StateSeparator problem data structure

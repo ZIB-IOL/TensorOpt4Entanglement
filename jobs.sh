@@ -1,10 +1,10 @@
 #!/bin/bash
 # Set variables
 timelimit=-1
-algorithms=("LD1" "LDR0" "LDR1" "LDR2" "LDR3" "LDR4" "LDR5") #("LDL" "D" "A" "LD1")
+algorithms=("RLT") #("RLT" "LD1" "LDR0" "LDR1" "LDR2" "LDR3" "LDR4" "LDR5" "LDL" "D" "A")
 datapath="$PWD/benchmark"
 resultpath="$PWD/results"
-juliabin="/home/htc/lxu/.julia/juliaup/julia-1.11.4+0.x64.linux.gnu/bin/julia" #"/home/lxu/software/julia-1.10.2/bin/julia"
+juliabin="julia" #"/home/lxu/software/julia-1.10.2/bin/julia"
 
 
 # Generate all job combinations and save to file

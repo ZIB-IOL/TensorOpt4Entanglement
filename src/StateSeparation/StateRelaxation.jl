@@ -86,6 +86,90 @@ function buildRelaxationTrivial(problem::Problem, cutoffbd::Float64)
     return optmodel
 end
 
+function buildRelaxationThreshold(problem::Problem)
+    dimH = problem.dimH
+    nsubs = problem.nsubs
+    BST = problem.BST
+    dims = problem.dims
+    Zdims = problem.Zdims
+    Treeids = problem.Treeids
+    XRs = []
+    XIs = []
+
+    model = Model()
+
+    YR = @variable(model, [1:dimH, 1:dimH], Symmetric)
+    YI = @variable(model, [1:dimH, 1:dimH] in SkewSymmetricMatrixSpace())
+
+    @constraint(model, tr(YR) == 1.0)
+    @constraint(model, [YR YI; -YI YR] in PSDCone())
+
+    for j in 1:nsubs
+        subdim = dims[j]
+        XR = @variable(model, [1:subdim, 1:subdim], Symmetric)
+        push!(XRs, XR)
+        XI = @variable(model, [1:subdim, 1:subdim] in SkewSymmetricMatrixSpace())
+        push!(XIs, XI)
+        @constraint(model, tr(XR) == 1.0)
+        @constraint(model, [XR XI; -XI XR] in PSDCone())
+    end
+
+    #@variable(model, 1 >= p >= 0)
+    #@constraint(model, (1 - p) * problem.H[:RE] + p * Matrix{Float64}(I, dimH, dimH) / dimH == YR)
+    #@constraint(model, (1 - p) * problem.H[:IM] == YI)
+    #@objective(model, Min, p)
+    # HS norm
+    Xs = Dict(:RE=>XRs, :IM=>XIs)
+    Y =  Dict(:RE=>YR, :IM=>YI)
+    Zs = Dict(:RE => [], :IM => [])
+    Zvars = Dict(:RE => [], :IM => [])
+
+    function createAuxSysVars(sys, leftsys, rightsys, retleft, retright)
+        dim = Zdims[sys.Zind]
+        if sys.parent == -1
+            @assert !isnothing(leftsys)
+            @assert !isnothing(rightsys)
+            @assert !isnothing(retleft)
+            @assert !isnothing(retright)
+            push!(Zs[:RE], Y[:RE])
+            push!(Zs[:IM], Y[:IM])
+        elseif sys.sysid != -1
+            push!(Zs[:RE], Xs[:RE][sys.sysid])
+            push!(Zs[:IM], Xs[:IM][sys.sysid])
+        else
+            @assert !isnothing(leftsys)
+            @assert !isnothing(rightsys)
+            @assert !isnothing(retleft)
+            @assert !isnothing(retright)
+            XR = @variable(model, [1:dim, 1:dim], Symmetric)
+            XI = @variable(model, [1:dim, 1:dim] in SkewSymmetricMatrixSpace())
+            @constraint(model, tr(XR) == 1.0)
+            @constraint(model, [XR XI; -XI XR] in PSDCone())
+            push!(Zs[:RE], XR)
+            push!(Zs[:IM], XI)
+        end
+        #zvarim = @variable(model, [1:dim, 1:dim])
+        #zvarre = @variable(model, [1:dim, 1:dim])
+        #@constraint(model, zvarim .==  Zs[:IM][end])
+        #@constraint(model, zvarre .==  Zs[:RE][end])
+        #push!(Zvars[:RE], zvarim)
+        #push!(Zvars[:IM], zvarre)
+        return dim
+    end
+
+    traverseDPSBST(1, BST, createAuxSysVars)
+
+    Min = Dict(:RE=> Matrix( Diagonal(ones(dimH) / dimH)), :IM=>zeros(dimH, dimH))
+
+    @variable(model, 1>= t >= 0)
+    @constraint(model, ( (1 - t) * problem.Hout[:RE] + t * Min[:RE]) + im *  ( (1 - t) * problem.Hout[:IM] + t *  Min[:IM]) .==  YR + im * YI)
+    @objective(model, Min, t)
+
+    optmodel = OptModel(model, Xs, Y, Zs, Zvars)
+
+    return optmodel
+end
+
 function buildRelaxationBound(problem::Problem, cutoffbd::Float64, eZind, epart, ej, ek, direction, globalobbt)
     dimH = problem.dimH
     nsubs = problem.nsubs
@@ -590,6 +674,12 @@ function strenghtenRelaxation(stateseparator::StateSeparator, optmodel::OptModel
         addPatialTraceConstraints(stateseparator, optmodel, focusnode)
         #addRank1Constraints(stateseparator, optmodel, focusnode)
     end
+end
+
+function initRelaxationThreshold(stateseparator::StateSeparator, focusnode::Node, usedps = false)
+    optmodel = buildRelaxationThreshold(stateseparator.problem)
+    strenghtenRelaxation(stateseparator, optmodel, focusnode, usedps)
+    return optmodel
 end
 
 function initRelaxationNode(stateseparator::StateSeparator, focusnode::Node, primalbd::Float64, usedps = false)

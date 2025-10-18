@@ -28,7 +28,6 @@ def load_benchmarks(benchmark_dir):
         filepath = os.path.join(benchmark_dir, filename)
         with open(filepath, 'r') as f:
             lines = f.readlines()
-            # 搜索文件内容，找到包含'nsubs'和'dimH'的行并提取数值
             nsubs = None
             name = None
             for line in lines:
@@ -117,14 +116,15 @@ for instance in instances:
 print("\\bottomrule")
 
 
-rank_algos = ["LD1", "LDR1",  "LDR2", "LDR3", "LDR4"]
+rank_algos = ["LDR0", "LDR1",  "LDR2", "LDR3", "LDR4", "LDR5"]
 
 algonames = {
-    "LD1": "LADMM\_400",
+    "LDR0": "LADMM\_400",
     "LDR1": "LADMM\_500",
     "LDR2": "LADMM\_600",
     "LDR3": "LADMM\_700",
     "LDR4": "LADMM\_800",
+    "LDR5": "LADMM\_900",
 }
 
 for instance in instances:

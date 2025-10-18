@@ -328,6 +328,14 @@ function detectEntanglementThresholdPPT(HR::Matrix{Float64}, HI::Matrix{Float64}
     return lb
 end
 
+function detectEntanglementThresholdRLT(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+    #purestates = getPureStates(HR, HI, dims, param)
+    separateproblem = Problem(HR, HI, dims)
+    # create the detector
+    lb = threshold!(separateproblem, param, 2)
+    return lb
+end
+
 function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     #purestates = getPureStates(HR, HI, dims, param)
     singlerun = false
