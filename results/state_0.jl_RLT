@@ -3,6 +3,6 @@ algo: RLT
 glbub: 0
 approxub: 0
 approxfeas: 0
-glblb: 0.7272727275338391
+glblb: 0.7272727275338482
 approxweights: 0
-time: 28.734166538
+time: 21.44438168
