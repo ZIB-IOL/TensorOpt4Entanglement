@@ -4,7 +4,7 @@ timelimit=-1
 algorithms=("RLT") #("RLT" "LD1" "LDR0" "LDR1" "LDR2" "LDR3" "LDR4" "LDR5" "LDL" "D" "A")
 datapath="$PWD/benchmark"
 resultpath="$PWD/results"
-juliabin="/home/lxu/software/julia-1.10.2/bin/julia"
+juliabin="julia"
 
 
 # Generate all job combinations and save to file
