@@ -24,6 +24,10 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+# One stamp for this invocation: every job list it writes carries it, so a
+# resubmission cannot disturb the lists a pending array is still reading.
+export JOBLIST_STAMP="$(date +%Y%m%d-%H%M%S)"
+
 # the available parts are whatever experiment scripts exist -- no second list
 ALL=()
 for f in scripts/exp_*.sh; do
@@ -44,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
         -*) FLAGS+=("$1")
-            case "$1" in -t|--time-limit|--results-dir|--trace-dir|--log-dir|--julia)
+            case "$1" in -t|--time-limit|-s|--state|-a|--algo|--results-dir|--trace-dir|--log-dir|--julia)
                 FLAGS+=("$2"); shift ;; esac
             shift ;;
         *)  PARTS+=("$1"); shift ;;
@@ -56,18 +60,23 @@ if [[ "$MODE" == "check" ]]; then
     # generate the lists without submitting, then audit table coverage
     rm -f job_list_*.txt
     for part in "${PARTS[@]}"; do
-        USE_SLURM=1 bash "scripts/exp_${part}.sh" "${FLAGS[@]+"${FLAGS[@]}"}" >/dev/null 2>&1
+        # stderr is kept: if an experiment cannot even build its list (no Mosek
+        # licence, a bad --algo) the coverage report would otherwise blame the
+        # tables for a failure that happened here.
+        if ! USE_SLURM=1 bash "scripts/exp_${part}.sh" "${FLAGS[@]+"${FLAGS[@]}"}" >/dev/null; then
+            echo "ERROR: could not generate the job list for '$part'; coverage below is meaningless" >&2
+            exit 1
+        fi
     done
     python3 scripts/check_coverage.py
     exit $?
 fi
 
-if [[ "$MODE" == "slurm" || "$MODE" == "dry" ]]; then
+if [[ "$MODE" == "slurm" ]]; then
     export LC_ALL=C
     export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-.julia_depot}"
     export MOSEKHOME="${MOSEKHOME:-/software/mosek/10.2}"
     export MOSEKLM_LICENSE_FILE="${MOSEKLM_LICENSE_FILE:-27007@solice01.zib.de}"
-    rm -f job_list_*.txt        # never submit a list left over from a previous run
     echo "instantiating the project..."
     julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
 fi
@@ -87,11 +96,11 @@ done
 if [[ "$MODE" == "slurm" ]]; then
     echo
     total=0
-    for list in job_list_*.txt; do
+    for list in joblists/*-"$JOBLIST_STAMP".txt; do
         [[ -f "$list" ]] || continue
         n=$(wc -l < "$list")
         if [[ $n -eq 0 ]]; then
-            echo "nothing to submit for ${list#job_list_}: all results already present"
+            echo "nothing to submit for $(basename "$list"): all results already present"
             rm -f "$list"
             continue
         fi

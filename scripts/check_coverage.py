@@ -21,7 +21,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--benchmark-dir", default=os.path.join(ROOT, "benchmark"))
-    ap.add_argument("--job-lists", default=os.path.join(ROOT, "job_list_*.txt"))
+    ap.add_argument("--job-lists", default=os.path.join(ROOT, "joblists", "*.txt"))
     args = ap.parse_args()
 
     ctx = Context(load_instances(args.benchmark_dir))

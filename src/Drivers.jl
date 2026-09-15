@@ -184,15 +184,6 @@ Canonical name for `code`, accepting the legacy shorthand.
 """
 resolveAlgorithm(code::AbstractString) = get(LEGACY_ALIASES, code, String(code))
 
-"""
-Result-file field names used before they were aligned with the paper's symbols.
-Readers accept both, so the runs published with the paper still load.
-"""
-const LEGACY_FIELDS = Dict(
-    "ub_relx" => "glbub", "lb_relx" => "glblb",
-    "ub_heur" => "approxub", "feas_heur" => "approxfeas",
-    "weights_sum" => "approxweights",
-)
 
 """
     withRelaxation(code, mode)
@@ -289,8 +280,9 @@ function runEntangle(args)
     open(result_file, "w") do io
         println(io, "instance: $(args["state"])")
         println(io, "algo: $algo")
-        # field names are the paper's symbols; see LEGACY_FIELDS for the
-        # names used by the runs published with the paper
+        # Field names are the paper's symbols. Runs published before the
+        # rename used glbub / glblb / approxub / approxfeas / approxweights;
+        # the reader in scripts/tables/common.py accepts either.
         println(io, "ub_relx: $glbub")
         println(io, "ub_heur: $approxub")
         println(io, "feas_heur: $approxfeas")

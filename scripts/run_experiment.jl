@@ -5,7 +5,7 @@ using ExactEntanglement
 
 # Entry point. Example:
 #     MOSEKLM_LICENSE_FILE=/path/to/mosek.lic \
-#         julia --project=. scripts/run_experiment.jl -s state_0.jl -a LD1 -t 600
+#         julia --project=. scripts/run_experiment.jl -s state_0.jl -a LADMM -t 600
 function parseCommandline()
     s = ArgParseSettings()
     @add_arg_table s begin
@@ -14,10 +14,11 @@ function parseCommandline()
             arg_type = String
             required = true
         "--algo", "-a"
-            help = "algorithm: LD/LD0/LD1/LDL (iterative refinement), LDR0-LDR5 " *
-                   "(LADMM rank sweep, m=5), D (cutting plane), A (alternating SDP), " *
-                   "AD (alternating SDP + cutting plane), PPT (DPS bound), " *
-                   "RLT (DDPS+ bound), LDual (experimental dual ALM)"
+            help = "algorithm (paper names): Alt-SDP, LADMM, CP, IR, DPS, DDPS+; " *
+                   "LADMM_400..LADMM_900 (m=5 rank sweep); " *
+                   "DDPS, CP-DDPS, IR-DDPS (DDPS-only ablation); " *
+                   "Alt-SDP+CP, IR-nolazy, IR-clear, DualALM. " *
+                   "Pre-rename shorthand (A, LD1, D, LDL, PPT, RLT, LDR0-5) also accepted"
             arg_type = String
             required = true
         "--time-limit", "-t"

@@ -76,4 +76,33 @@ end
         # an unknown code passes through untouched, so the error names it
         @test E.resolveAlgorithm("nosuch") == "nosuch"
     end
+
+    @testset "the three alias tables agree" begin
+        # The legacy algorithm codes are listed in three places, because three
+        # languages need them: Julia (CLI), bash (--algo filter and resume),
+        # and Python (reading published result files). They must not drift.
+        root = joinpath(@__DIR__, "..")
+
+        libsh = read(joinpath(root, "scripts", "lib.sh"), String)
+        bash_pairs = Dict{String,String}()
+        for m in eachmatch(r"\[([A-Za-z0-9_]+)\]=\"([^\"]+)\"", libsh)
+            bash_pairs[m.captures[1]] = m.captures[2]
+        end
+        @test !isempty(bash_pairs)
+        @test bash_pairs == E.LEGACY_ALIASES
+
+        common = read(joinpath(root, "scripts", "tables", "common.py"), String)
+        py_pairs = Dict{String,String}()
+        for m in eachmatch(r"\"([A-Za-z0-9+_-]+)\": \"([A-Za-z0-9+_-]+)\"", common)
+            py_pairs[m.captures[1]] = m.captures[2]
+        end
+        # common.py maps canonical -> legacy, the inverse of LEGACY_ALIASES;
+        # the LADMM_* entries are generated in a comprehension, so check the
+        # explicit ones only.
+        for (canon, legacy) in py_pairs
+            haskey(E.LEGACY_ALIASES, legacy) || continue
+            @test E.LEGACY_ALIASES[legacy] == canon
+        end
+        @test length(py_pairs) >= 13
+    end
 end

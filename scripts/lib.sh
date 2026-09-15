@@ -18,10 +18,23 @@ BENCHMARK_DIR="${BENCHMARK_DIR:-$REPO_ROOT/benchmark}"
 # results/ itself still holds the flat files published with the paper.
 # `set_part <name>` is called by each experiment script before running.
 PART="${PART:-}"
+JOBLIST_STAMP="${JOBLIST_STAMP:-$(date +%Y%m%d-%H%M%S)}"
 declare -A _JOBLIST_STARTED
 # optional narrowing, set by --state / --algo
 ONLY_STATES=()
 ONLY_ALGOS=()
+
+# Legacy algorithm codes, mirroring LEGACY_ALIASES in src/Drivers.jl so that
+# --algo accepts the same spellings as the Julia CLI. test_params.jl asserts
+# the two stay in agreement.
+declare -A ALGO_ALIASES=(
+    [A]="Alt-SDP" [LD1]="LADMM" [D]="CP" [LDL]="IR" [PPT]="DPS" [RLT]="DDPS+"
+    [LD]="IR-nolazy" [LD0]="IR-clear" [AD]="Alt-SDP+CP" [LDual]="DualALM"
+    [RLT_DDPS]="DDPS" [D_DDPS]="CP-DDPS" [LDL_DDPS]="IR-DDPS"
+    [LDR0]="LADMM_400" [LDR1]="LADMM_500" [LDR2]="LADMM_600"
+    [LDR3]="LADMM_700" [LDR4]="LADMM_800" [LDR5]="LADMM_900"
+)
+canonical_algo() { echo "${ALGO_ALIASES[$1]:-$1}"; }
 set_part() {
     PART="$1"
     RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results/$PART}"
@@ -125,11 +138,23 @@ instances_with_m() {
 state_name() { grep -m1 '^name' "$BENCHMARK_DIR/$1" | sed 's/.*=[[:space:]]*//; s/"//g'; }
 
 # --- one job --------------------------------------------------------------
+# A result may sit under the canonical name or, if it predates the rename,
+# under the legacy code; either counts as done.
+result_exists() {
+    local state="$1" algo="$2" legacy
+    [[ -f "$RESULTS_DIR/${state}_${algo}" ]] && return 0
+    for legacy in "${!ALGO_ALIASES[@]}"; do
+        if [[ "${ALGO_ALIASES[$legacy]}" == "$algo" && -f "$RESULTS_DIR/${state}_${legacy}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 run_job() {
     local state="$1" algo="$2"
-    local out="$RESULTS_DIR/${state}_${algo}"
-    if [[ -f "$out" && "$FORCE" != "1" ]]; then
-        echo "  skip   $state $algo (result exists; FORCE=1 to redo)"
+    if [[ "$FORCE" != "1" ]] && result_exists "$state" "$algo"; then
+        echo "  skip   $state $algo (result exists; --force to redo)"
         return 0
     fi
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -166,9 +191,10 @@ run_table() {
     # for something this experiment does not contain is an error rather than a
     # silent no-op, so a typo cannot look like a completed run.
     if [[ ${#ONLY_ALGOS[@]} -gt 0 ]]; then
-        local keep=() a want
+        local keep=() a want canon
         for want in "${ONLY_ALGOS[@]}"; do
-            for a in "${algos[@]}"; do [[ "$a" == "$want" ]] && keep+=("$a"); done
+            canon="$(canonical_algo "$want")"
+            for a in "${algos[@]}"; do [[ "$a" == "$canon" ]] && keep+=("$a"); done
         done
         if [[ ${#keep[@]} -eq 0 ]]; then
             echo "ERROR: none of '${ONLY_ALGOS[*]}' belong to $table (has: ${algos[*]})" >&2
@@ -199,7 +225,11 @@ run_table() {
     if [[ "$USE_SLURM" == "1" ]]; then
         # One list per experiment part, in the format run.slurm parses. The
         # fifth field routes results to this part's directory.
-        local joblist="$REPO_ROOT/job_list_${PART:-$table}.txt"
+        # run.slurm reads the list when each array task starts, not at submit
+        # time, so a list must never be rewritten while a submission is still
+        # pending. Each invocation gets its own timestamped file.
+        mkdir -p "$REPO_ROOT/joblists"
+        local joblist="$REPO_ROOT/joblists/${PART:-$table}-${JOBLIST_STAMP}.txt"
         # An experiment calls run_table once per subsystem count, so truncate
         # only on the first call in this process and append afterwards --
         # otherwise m=4 would overwrite the m=3 jobs.
@@ -212,7 +242,7 @@ run_table() {
         # everything regardless.
         local added=0 skipped=0
         for s in "${states[@]}"; do for a in "${algos[@]}"; do
-            if [[ -f "$RESULTS_DIR/${s}_${a}" && "$FORCE" != "1" ]]; then
+            if [[ "$FORCE" != "1" ]] && result_exists "$s" "$a"; then
                 skipped=$((skipped+1))
                 continue
             fi
