@@ -73,11 +73,16 @@ if [[ "$MODE" == "check" ]]; then
     exit $?
 fi
 
+# Site defaults, needed by every mode that actually runs Julia. Each is a
+# ${VAR:-default}, so an environment that already sets them wins.
+export LC_ALL=C
+export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-.julia_depot}"
+export MOSEKHOME="${MOSEKHOME:-/software/mosek/10.2}"
+export MOSEKLM_LICENSE_FILE="${MOSEKLM_LICENSE_FILE:-27007@solice01.zib.de}"
+
+# Only a real submission needs the packages resolved up front; --dry-run and
+# --check must not pay for a full instantiate/precompile.
 if [[ "$MODE" == "slurm" ]]; then
-    export LC_ALL=C
-    export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-.julia_depot}"
-    export MOSEKHOME="${MOSEKHOME:-/software/mosek/10.2}"
-    export MOSEKLM_LICENSE_FILE="${MOSEKLM_LICENSE_FILE:-27007@solice01.zib.de}"
     echo "instantiating the project..."
     julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
 fi

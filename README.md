@@ -64,13 +64,20 @@ Everything goes through `runjobs.sh`; see
 full workflow. In short:
 
 ```bash
-export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic
+export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic   # or port@host for a licence server
 
+bash scripts/check_env.sh    # can this machine run the jobs at all?
 bash runjobs.sh --check      # verify every table would have data
 bash runjobs.sh --dry-run    # list the jobs, run nothing
 bash runjobs.sh --local      # run here, sequentially
 bash runjobs.sh              # submit to Slurm
 ```
+
+`scripts/check_env.sh` checks Julia's version, the project layout, writable
+output directories, disk space, the Mosek licence — by solving a test LP, not
+just looking for the variable — and, where Slurm is present, that the partition
+and node feature named in `run.slurm` actually exist and that `MaxArraySize` is
+large enough. It reports every problem rather than stopping at the first.
 
 On the cluster, adjust the resource requests at the top of `run.slurm`
 (`--mem`, `--time`, `--partition`, `--constraint`) to your site; the paper's
