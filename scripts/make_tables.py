@@ -17,6 +17,13 @@ import argparse, math, os, re, sys, csv
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Experiments write into their own directory; `results/` itself still holds the
+# flat files published with the paper. Searched in order, first hit wins, so a
+# fresh run shadows the published one.
+RESULT_DIRS = [os.path.join(ROOT, "results", p) for p in ("main", "lowrank", "ddps")]
+RESULT_DIRS.append(os.path.join(ROOT, "results"))
+TRACE_DIRS = [os.path.join(d, "traces") for d in RESULT_DIRS]
+
 # algorithm code -> (display name, emphasise?)  emphasis marks methods
 # developed in this paper, matching the existing tables.
 MAIN_ROWS = [("A", "Alt-SDP", False), ("LD1", "LADMM", True), ("D", "CP", True),
@@ -65,10 +72,20 @@ def load_instances(benchmark_dir):
     return out
 
 
-def load_result(results_dir, state, algo):
-    path = os.path.join(results_dir, f"{state}_{algo}")
-    if not os.path.isfile(path):
+# every cell resolved during this process, for --manifest
+PROVENANCE = {}
+
+
+def load_result(results_dirs, state, algo):
+    """First matching raw file across the search path, or None."""
+    if isinstance(results_dirs, str):
+        results_dirs = [results_dirs]
+    path = next((os.path.join(d, f"{state}_{algo}")
+                 for d in results_dirs
+                 if os.path.isfile(os.path.join(d, f"{state}_{algo}"))), None)
+    if path is None:
         return None
+    PROVENANCE[(state, algo)] = os.path.relpath(path, ROOT)
     rec = {}
     for line in open(path):
         if ":" in line:
@@ -94,11 +111,16 @@ def load_result(results_dir, state, algo):
         return None
 
 
-def load_trace_means(trace_dir, state, algo):
+def load_trace_means(trace_dirs, state, algo):
     """Mean ub_relx / lb_relx / b_lower over the gap-closing CP iterations."""
-    path = os.path.join(trace_dir, f"{state}_{algo}.cp.csv")
-    if not os.path.isfile(path):
+    if isinstance(trace_dirs, str):
+        trace_dirs = [trace_dirs]
+    path = next((os.path.join(d, f"{state}_{algo}.cp.csv")
+                 for d in trace_dirs
+                 if os.path.isfile(os.path.join(d, f"{state}_{algo}.cp.csv"))), None)
+    if path is None:
         return None
+    PROVENANCE[(state, algo + " [trace]")] = os.path.relpath(path, ROOT)
     ub, lb, b = [], [], []
     with open(path) as fh:
         for row in csv.DictReader(fh):
@@ -197,7 +219,7 @@ def gapclosing_block(states, instances, rows, trace_dir):
     out.append("\\bottomrule")
     if missing:
         print(f"WARNING: {missing} row(s) have no gap-closing trace; "
-              f"run scripts/table_m5_gapclosing.sh", file=sys.stderr)
+              f"run scripts/exp_main.sh (it records the CP trajectories)", file=sys.stderr)
     return "\n".join(out)
 
 
@@ -273,16 +295,48 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--table", default="all", choices=list(TABLES) + ["all"])
     ap.add_argument("--benchmark-dir", default=os.path.join(ROOT, "benchmark"))
-    ap.add_argument("--results-dir", default=os.path.join(ROOT, "results"))
-    ap.add_argument("--trace-dir", default=os.path.join(ROOT, "results", "traces"))
+    ap.add_argument("--results-dir", action="append",
+                    help="raw-result directory; repeatable, searched in order "
+                         f"(default: {', '.join(os.path.relpath(d, ROOT) for d in RESULT_DIRS)})")
+    ap.add_argument("--trace-dir", action="append", help="trajectory directory; repeatable")
+    ap.add_argument("--manifest", action="store_true",
+                    help="list the raw file behind every cell instead of emitting LaTeX")
     ap.add_argument("--out", help="directory to write <table>.tex into (default: stdout)")
     args = ap.parse_args()
+    args.results_dir = args.results_dir or RESULT_DIRS
+    args.trace_dir = args.trace_dir or TRACE_DIRS
 
     instances = load_instances(args.benchmark_dir)
     if not instances:
         sys.exit(f"no benchmark instances found in {args.benchmark_dir}")
 
     wanted = list(TABLES) if args.table == "all" else [args.table]
+
+    if args.manifest:
+        print("# Raw result files behind each table.")
+        print("# Regenerate a table with: python3 scripts/make_tables.py --table <name>")
+        missing_total = 0
+        for t in wanted:
+            PROVENANCE.clear()
+            build(t, args, instances)            # populates PROVENANCE as a side effect
+            spec = TABLES[t]
+            states = sorted((x for x, (_, mm) in instances.items() if mm == spec["m"]),
+                            key=lambda x: display_name(instances[x][0]))
+            wanted_cells = [(x, a) for x in states for a, _, _ in spec["rows"]]
+            found = {k: v for k, v in PROVENANCE.items()}
+            missing = [c for c in wanted_cells
+                       if c not in found and (c[0], c[1] + " [trace]") not in found]
+            missing_total += len(missing)
+            print(f"\n## table {t}  ({len(wanted_cells) - len(missing)}/{len(wanted_cells)} cells)")
+            for (state, algo), path in sorted(found.items()):
+                print(f"  {display_name(instances[state][0]):<12} {algo:<14} {path}")
+            for state, algo in missing:
+                print(f"  {display_name(instances[state][0]):<12} {algo:<14} MISSING")
+        if missing_total:
+            print(f"\n# {missing_total} cell(s) have no raw file; "
+                  f"run the matching experiment in scripts/", file=sys.stderr)
+        return
+
     for t in wanted:
         body = build(t, args, instances)
         if args.out:

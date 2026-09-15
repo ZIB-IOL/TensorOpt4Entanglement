@@ -133,181 +133,131 @@ bash runjobs.sh
 
 ## Reproducing the paper's tables
 
-Each experimental table has its own script, plus one master script that runs
-them all. Finished jobs are skipped, so an interrupted run can be restarted.
+The workflow is split in two: **bash scripts run experiments**, **python scripts
+analyse the saved results**. The three experiments are disjoint — no
+instance/algorithm pair is executed twice — and each writes into its own
+directory, so every raw file is attributable to the run that produced it.
 
-| script | table | what it runs |
-|---|---|---|
-| `scripts/table_m3.sh` | `tab.m3` | m=3: 3 states x {Alt-SDP, LADMM, CP, IR, DPS, DDPS+}, 1 h limit |
-| `scripts/table_m4.sh` | `tab.m4` | m=4: 4 states x same 6 algorithms, 2 h limit |
-| `scripts/table_m5.sh` | `tab.m5` | m=5: 4 states x same 6 algorithms, 3 h limit |
-| `scripts/table_m5_lowrank.sh` | `tab.m5low` | m=5: LADMM with r = 400…900 |
-| `scripts/table_m5_gapclosing.sh` | `tab.m5CP` | m=5: CP and IR, averaged over gap-closing iterations |
-| `scripts/table_ddps.sh` | `ddps3`/`ddps4`/`ddps5` | DDPS vs DDPS+ ablation of the sBB oracle |
-| `scripts/experiment_convergence.sh` | — | bound-convergence trajectories |
-| `scripts/run_all_tables.sh` | all of the above | |
+### Experiments (bash)
+
+| script | what it runs | results | cost |
+|---|---|---|---|
+| `scripts/exp_main.sh` | all instances × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+} | `results/main/` | ~210 CPU-h |
+| `scripts/exp_lowrank.sh` | m=5 × LADMM with r = 400…900 | `results/lowrank/` | ~72 CPU-h |
+| `scripts/exp_ddps_ablation.sh` | m=3,4 × the DDPS-only variants | `results/ddps/` | ~44 CPU-h |
+| `scripts/run_all_experiments.sh` | all three, or a named subset | | |
 
 ```bash
 export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic
 
-bash scripts/table_m3.sh                      # one table
-bash scripts/run_all_tables.sh                # everything (~200 CPU-hours)
-bash scripts/run_all_tables.sh m3 m5          # a subset
+bash scripts/exp_main.sh                          # one experiment
+bash scripts/run_all_experiments.sh               # all of them
+bash scripts/run_all_experiments.sh main ddps_ablation
 
-bash scripts/run_all_tables.sh --dry-run      # list the jobs, run nothing
-bash scripts/run_all_tables.sh --force        # redo every experiment from scratch
-bash scripts/table_m3.sh --time-limit 60      # quick smoke test (not paper settings)
-bash scripts/run_all_tables.sh --slurm        # emit job lists for run.slurm
-bash scripts/table_m3.sh --help               # all options
+bash scripts/run_all_experiments.sh --dry-run     # list jobs, run nothing
+bash scripts/run_all_experiments.sh --force       # redo every experiment
+bash scripts/exp_main.sh -t 60                    # smoke test (not paper settings)
+bash scripts/run_all_experiments.sh --slurm       # emit job lists for run.slurm
+bash scripts/exp_main.sh --help                   # all options
 ```
 
-By default a job whose result file already exists is skipped, so an interrupted
-run can simply be restarted. `--force` (`-f`) ignores existing results and
-re-runs everything; it is forwarded by `run_all_tables.sh` to every table.
+Finished jobs are skipped, so an interrupted run resumes. `M="3"` restricts an
+experiment to one subsystem count.
 
-Options: `-f/--force`, `-n/--dry-run`, `-t/--time-limit SEC`, `--slurm`,
-`--results-dir`, `--trace-dir`, `--log-dir`, `--julia`, `-h/--help`. The
-equivalent environment variables (`FORCE`, `DRY_RUN`, `TIME_LIMIT`,
-`USE_SLURM`, `RESULTS_DIR`, `TRACE_DIR`, `LOG_DIR`, `JULIA_BIN`,
-`BENCHMARK_DIR`) still work.
+`exp_main.sh` is the raw material for most of the analysis: it produces the
+final bounds, the CP and LADMM trajectories, and the size/memory diagnostics in
+one pass, so the convergence plots, the gap-closing table and the performance
+profiles all derive from it rather than needing their own runs.
 
-Instances are selected by the `N = <m>` line inside each benchmark file, so a
-new benchmark automatically joins the right table.
+### Analysis (python)
 
-`TIME_LIMIT=-1` (the default) lets the code apply the paper's per-size limits
-of 1/2/3 hours for m=3/4/5.
+| command | produces |
+|---|---|
+| `make_tables.py --table m3\|m4\|m5` | the three main results tables |
+| `make_tables.py --table m5low` | the LADMM rank sweep |
+| `make_tables.py --table m5cp` | gap-closing CP averages (from trajectories) |
+| `make_tables.py --table ddps3\|ddps4\|ddps5` | DDPS vs DDPS+ ablation |
+| `make_tables.py --table mem3\|mem4\|mem5` | per-level memory |
+| `make_tables.py --table size3\|size4\|size5` | relaxation size and file size |
+| `make_tables.py --manifest` | **the raw file behind every table cell** |
+| `performance_profile.py` | performance profiles (Dolan–Moré) |
+| `summarize_traces.py` | convergence trajectories |
+
+```bash
+python3 scripts/make_tables.py --table all --out tables/
+python3 scripts/make_tables.py --manifest          # provenance of every cell
+python3 scripts/performance_profile.py --out plots/
+python3 scripts/summarize_traces.py --out plots/
+```
+
+`--manifest` answers "which raw files back this table": it lists every cell with
+its file path, and marks cells with no data as `MISSING` along with the
+experiment that would produce them.
+
+Results are searched in `results/main`, `results/lowrank`, `results/ddps`, then
+`results/` itself (the flat files published with the paper), first hit winning —
+so a fresh run shadows the published one without deleting it.
+
+matplotlib is not a dependency: the plot scripts emit whitespace-separated
+`.dat` files that `\addplot table` reads directly.
+
+### Algorithm codes
+
+The `-a` codes are a stable contract — `results/` filenames and the analysis
+scripts key off them.
+
+| code | paper name | |
+|------|------------|---|
+| `LD` / `LD0` / `LDL` | IR | iterative refinement |
+| `LD1` | LADMM | one refinement iteration = standalone LADMM + crossover |
+| `LDR0`…`LDR5` | LADMM_r | r = 400…900 (m = 5) |
+| `D` | CP | cutting plane |
+| `A` | Alt-SDP | alternating SDP |
+| `AD` | Alt-SDP + CP | |
+| `PPT` | DPS | DPS hierarchy bound via Ket.jl |
+| `RLT` | DDPS+ | tensor-RLT bound at the sBB root |
+| `RLT_DDPS`, `D_DDPS`, `LDL_DDPS` | — | DDPS-only counterparts, for the ablation |
+
+### What each run records
+
+Result files carry the bounds plus provenance and diagnostics:
+
+```
+glbub / glblb / approxub / approxfeas / time      the reported values
+relaxation / seed / julia / host                   provenance
+relax_nvars / relax_ncons / relax_nnz              root relaxation size
+relax_cbf_bytes                                    its size on disk (CBF)
+mem_total_* / mem_cp_* / mem_lmo_* / mem_ladmm_*   memory per level
+```
+
+The relaxation is measured **without solving it**, so those figures are
+deterministic and machine-independent; only the memory fields depend on the
+host. Memory is attributed to each algorithmic level, and the phases **nest**
+(`:total` ⊃ `:cp` ⊃ `:lmo`), so the figures are inclusive and `:lmo` is
+reported separately to show its share. Set `EXACTENT_NO_DIAGNOSTICS=1` to skip
+the extra model build.
 
 ### DDPS vs DDPS+
 
 DDPS+ *is* the relaxation the sBB oracle uses: `initRelaxationNode` (the oracle)
 and `initRelaxationThreshold` (the `RLT` bound) call the same
 `strengthenRelaxation`. `--relaxation ddps` restricts it to the DDPS outer
-approximation alone — node bounds plus partial-trace consistency, without the
+approximation alone — node bounds and partial-trace consistency, without the
 tensor and scalar McCormick families — so the contribution of the `+` can be
-measured:
-
-```bash
-bash scripts/table_ddps.sh                    # runs both variants, m = 3 and 4
-python3 scripts/make_tables.py --table ddps3
-```
-
-The algorithm codes `RLT_DDPS`, `D_DDPS` and `LDL_DDPS` are the DDPS-only
-counterparts of `RLT`, `D` and `LDL`. `ddpsplus` is the default everywhere, so
-existing behaviour is unchanged.
-
-### Problem size and memory
-
-Every run records the size of the sBB root relaxation and the peak resident set
-size, in the result file:
-
-```
-relax_nvars: 92      variables in the root relaxation
-relax_ncons: 1040    constraints
-relax_nnz: 4402      nonzero coefficients
-peak_rss_mib: 1188.9 peak memory of the process
-```
-
-The relaxation is measured **without solving it**, so the three size figures are
-deterministic and machine-independent; only `peak_rss_mib` depends on the host.
-
-Memory is also attributed to each algorithmic level, so you can see *which*
-level needs it rather than only the process total:
-
-```
-mem_total_alloc_gib: 6.32     whole algorithm
-mem_cp_alloc_gib:    5.68     cutting-plane master
-mem_lmo_alloc_gib:   5.19     sBB oracle      mem_lmo_calls: 302
-mem_ladmm_alloc_gib: 3.74     lifted ADMM     mem_ladmm_calls: 1
-```
-
-Each level also records `_live_mib` (largest live heap seen), `_peak_rss_mib`
-and, where it builds a model, `_model_nvars` / `_model_ncons` / `_model_nnz`.
-
-**The phases nest**: `:total` contains `:cp`, which contains the `:lmo` calls it
-makes, so the figures are inclusive and `:lmo` is reported separately to show
-its share. On a short `Dicke_3_1` run the oracle accounted for 5.19 of CP's
-5.68 GiB, while for IR the LADMM and oracle costs were comparable
-(3.74 vs 2.54 GiB).
-
-```bash
-python3 scripts/make_tables.py --table mem3    # per-level memory table
-```
-This is on by default; set `EXACTENT_NO_DIAGNOSTICS=1` to skip the extra model
-build. Result files also record `relaxation`, `seed`, `julia` and `host` for
-provenance.
-
-```bash
-python3 scripts/make_tables.py --table size3   # size/memory table
-```
-
-### Bound-convergence trajectories
-
-```bash
-bash scripts/experiment_convergence.sh              # GHZ_3/4/5 x {CP, IR, LADMM}
-python3 scripts/summarize_traces.py                 # text summary
-python3 scripts/summarize_traces.py --out plots/    # pgfplots .dat files
-```
-
-The summary also reports how many CP iterations returned **no** lower bound
-because the sBB oracle terminated early — the quantity behind the
-"LMO early termination" question — and, for GHZ instances, the analytic
-threshold `1 - 1/(1 + 2^(m-1))` as a reference line.
-
-### Generating the LaTeX
-
-```bash
-python3 scripts/make_tables.py --table all          # print all table bodies
-python3 scripts/make_tables.py --table m3           # just one
-python3 scripts/make_tables.py --table all --out tables/
-```
-
-Two caveats:
-
-- The **PDGR** rows come from an external implementation (FrankWolfe.jl, Liu et
-  al.) and are not produced here; the generator emits a commented placeholder.
-  Because of that, bolding of the best bound is computed over the rows this
-  repository generates, which can differ from the paper where a PDGR value was
-  the best.
-- The **gap-closing table** (`tab.m5CP`) averages over CP iterations rather than
-  using final values, so it is built from the trajectory files described below.
+measured. `ddpsplus` is the default, so existing behaviour is unchanged.
 
 ### Recording trajectories
 
-Result files hold only the final bounds. Set `EXACTENT_TRACE` to a path
-*prefix* and the two iterative loops each append a CSV trajectory:
+`EXACTENT_TRACE` is a path *prefix*; the two iterative loops each append a CSV:
 
-| file | columns | written by |
-|---|---|---|
-| `<prefix>.cp.csv` | `iter,is_last,ub_relx,lb_relx,b_lower,n_states` | the cutting plane (`D`, `LDL`, `LD1`, `AD`) |
-| `<prefix>.ladmm.csv` | `iter,zeta,f,pen,residual,grad_norm,z,alm` | LADMM (`LD1`, `LDL`, `LDR*`) |
+| file | columns |
+|---|---|
+| `<prefix>.cp.csv` | `iter,is_last,ub_relx,lb_relx,b_lower,n_states` |
+| `<prefix>.ladmm.csv` | `iter,zeta,f,pen,residual,grad_norm,z,alm` |
 
 `b_lower` is the sBB oracle's lower bound for that round, so
-`lb_relx = ub_relx + b_lower`. `residual` is the coupling violation
-‖A(z) + a − Ψ(x)‖₂, which certifies `ub_heur` once it vanishes; `zeta` is the
-LADMM penalty ζ.
+`lb_relx = ub_relx + b_lower`; `residual` is the coupling violation
+‖A(z) + a − Ψ(x)‖₂, which certifies `ub_heur` once it vanishes. The experiment
+scripts set this automatically. `summarize_traces.py` also reports how many CP
+iterations returned **no** lower bound because the oracle terminated early.
 
-The table scripts set this automatically (into `--trace-dir`, default
-`results/traces/`). To record one by hand:
-
-```bash
-EXACTENT_TRACE=/tmp/run julia --project=. scripts/run_experiment.jl -s state_13.jl -a LDL -t 600
-# -> /tmp/run.cp.csv and /tmp/run.ladmm.csv
-```
-
-Tracing is off unless `EXACTENT_TRACE` is set, and the traced and untraced code
-paths are otherwise identical.
-
-## Run the Python script to parse result data
-
-Prerequisites:
-- Python 3.8+ installed.
-- (Optional) Create and activate a virtual environment and install dependencies if a requirements file exists.
-
-
-Basic usage (from project root):
-```bash
-# simple run (reads/writes paths relative to project root)
-python3 scripts/make_tables.py --table all
-```
-
-This prints the tables aggregating the results.

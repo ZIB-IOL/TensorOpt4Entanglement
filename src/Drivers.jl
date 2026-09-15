@@ -227,7 +227,8 @@ function runEntangle(args)
     stats = relaxationStats(HR, HI, dims, param)
     if param.log_level > 0
         println("Root relaxation: $(stats.nvars) vars, $(stats.ncons) constraints, ",
-                "$(stats.nnz) nonzeros (built in $(round(stats.build_s, digits=2)) s)")
+                "$(stats.nnz) nonzeros, $(round(stats.cbf_bytes/2^20, digits=2)) MiB as CBF ",
+                "(measured in $(round(stats.build_s, digits=2)) s)")
     end
     glbub, glblb, approxub, approxfeas, approxweights = Inf, -Inf, Inf, 0.0, 0
     resetPhases!()
@@ -260,6 +261,7 @@ function runEntangle(args)
         println(io, "relax_nvars: $(stats.nvars)")
         println(io, "relax_ncons: $(stats.ncons)")
         println(io, "relax_nnz: $(stats.nnz)")
+        println(io, "relax_cbf_bytes: $(stats.cbf_bytes)")
         println(io, "peak_rss_mib: $(round(peakRSSMiB(), digits=1))")
         # per-level memory: :total contains :cp, which contains :lmo (see Diagnostics.jl)
         for line in phaseReport()

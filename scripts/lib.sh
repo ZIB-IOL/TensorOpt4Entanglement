@@ -7,9 +7,26 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BENCHMARK_DIR="${BENCHMARK_DIR:-$REPO_ROOT/benchmark}"
-RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results}"
-TRACE_DIR="${TRACE_DIR:-$REPO_ROOT/results/traces}"
-LOG_DIR="${LOG_DIR:-$REPO_ROOT/results/logs}"
+
+# Each experiment writes into its own directory, so the parts never overwrite
+# one another and every raw file is attributable to the run that produced it:
+#
+#   results/main/     the main benchmark      (exp_main.sh)
+#   results/lowrank/  the LADMM rank sweep    (exp_lowrank.sh)
+#   results/ddps/     the DDPS ablation       (exp_ddps_ablation.sh)
+#
+# results/ itself still holds the flat files published with the paper.
+# `set_part <name>` is called by each experiment script before running.
+PART="${PART:-}"
+set_part() {
+    PART="$1"
+    RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results/$PART}"
+    TRACE_DIR="${TRACE_DIR:-$RESULTS_DIR/traces}"
+    LOG_DIR="${LOG_DIR:-$RESULTS_DIR/logs}"
+}
+RESULTS_DIR="${RESULTS_DIR:-}"
+TRACE_DIR="${TRACE_DIR:-}"
+LOG_DIR="${LOG_DIR:-}"
 
 # -t -1 lets the code pick the paper's per-size limit (1/2/3 h for m=3/4/5).
 TIME_LIMIT="${TIME_LIMIT:--1}"

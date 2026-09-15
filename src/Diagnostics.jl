@@ -58,6 +58,27 @@ function modelStats(model::Model)
 end
 
 """
+    modelFileSize(model)
+
+On-disk size of the model in Conic Benchmark Format, in bytes. CBF is the
+standard exchange format for conic problems, so this is a solver-independent
+measure of how large the instance actually is -- the "file size" a reviewer
+would see. Returns 0 if the model cannot be written.
+"""
+function modelFileSize(model::Model)
+    path = tempname() * ".cbf"
+    try
+        write_to_file(model, path)
+        return filesize(path)
+    catch e
+        @warn "could not write model to CBF" exception = e
+        return 0
+    finally
+        rm(path; force = true)
+    end
+end
+
+"""
     relaxationStats(HR, HI, dims, param) -> NamedTuple
 
 Build the sBB root relaxation for this instance and measure its size without
@@ -65,7 +86,7 @@ solving it. Returns variables, constraints, nonzeros and the build time, or
 zeros when diagnostics are disabled or the build fails.
 """
 function relaxationStats(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
-    empty = (nvars = 0, ncons = 0, nnz = 0, build_s = 0.0)
+    empty = (nvars = 0, ncons = 0, nnz = 0, cbf_bytes = 0, build_s = 0.0)
     get(ENV, "EXACTENT_NO_DIAGNOSTICS", "0") == "1" && return empty
     try
         t0 = time()
@@ -76,7 +97,8 @@ function relaxationStats(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{
         stateseparatorAddNode!(ss, root)
         optmodel = initRelaxationNode(ss, root, -1.0)
         nvars, ncons, nnz = modelStats(optmodel.model)
-        return (nvars = nvars, ncons = ncons, nnz = nnz, build_s = time() - t0)
+        return (nvars = nvars, ncons = ncons, nnz = nnz,
+                cbf_bytes = modelFileSize(optmodel.model), build_s = time() - t0)
     catch e
         @warn "relaxation diagnostics failed" exception = (e, catch_backtrace())
         return empty
