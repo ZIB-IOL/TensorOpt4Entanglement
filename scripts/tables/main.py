@@ -12,8 +12,8 @@ from .common import bounds_block
 
 # algorithm code -> (display name, emphasise?)  emphasis marks methods
 # developed in this paper, matching the existing tables.
-ROWS = [("A", "Alt-SDP", False), ("LD1", "LADMM", True), ("D", "CP", True),
-        ("LDL", "IR", True), ("PPT", "DPS", False), ("RLT", "DDPS+", True)]
+ROWS = [("Alt-SDP", "Alt-SDP", False), ("LADMM", "LADMM", True), ("CP", "CP", True),
+        ("IR", "IR", True), ("DPS", "DPS", False), ("DDPS+", "DDPS+", True)]
 
 TABLES = {
     "m3": dict(m=3, rows=ROWS, experiment="exp_main.sh"),

@@ -31,7 +31,7 @@ set_part main
 M="${M:-3 4 5}"
 failed=0
 for m in $M; do
-    run_table "main_m${m}" "$m" A LD1 D LDL PPT RLT || failed=$((failed+1))
+    run_table "main_m${m}" "$m" Alt-SDP LADMM CP IR DPS DDPS+ || failed=$((failed+1))
 done
 [[ $failed -eq 0 ]] || exit 1
 echo

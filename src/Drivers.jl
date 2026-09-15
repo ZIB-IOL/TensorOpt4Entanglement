@@ -60,9 +60,11 @@ const SIZE_PRESETS = Dict(
           maxnnodes = 0),
 )
 
-"Factorisation size r selected by the `LDR*` codes (m = 5 rank sweep)."
-const RANK_SWEEP = Dict("LDR0" => 400, "LDR1" => 500, "LDR2" => 600,
-                        "LDR3" => 700, "LDR4" => 800, "LDR5" => 900)
+"""
+Factorisation size r selected by the `LADMM_<r>` codes (the m = 5 rank sweep of
+the paper's low-rank table).
+"""
+const RANK_SWEEP = Dict("LADMM_$r" => r for r in (400, 500, 600, 700, 800, 900))
 
 """
     applySizePreset!(param, nsubs, algo)
@@ -71,6 +73,7 @@ Apply the preset for `nsubs` subsystems in place. `maxrounds` tracks the
 factorisation size (the CP iteration limit inside IR is set to r).
 """
 function applySizePreset!(param::Param, nsubs::Int, algo::String)
+    algo = resolveAlgorithm(algo)   # so a legacy code still selects its r
     preset = get(SIZE_PRESETS, nsubs, nothing)
     isnothing(preset) && return param
 
@@ -100,58 +103,92 @@ Algorithm codes accepted by `-a`. These are a stable external contract:
 `jobs.sh`, the filenames under `results/`, and `scripts/make_tables.py` all key
 off them, so add codes rather than renaming existing ones.
 
-| code     | paper       | what it runs                                        |
-|----------|-------------|-----------------------------------------------------|
-| `LD`     | IR          | iterative refinement, unlimited iterations           |
-| `LD0`    | IR          | a single IR iteration, active set cleared            |
-| `LD1`    | LADMM       | a single IR iteration = LADMM + one CP crossover     |
-| `LDR0-5` | LADMM_r     | as `LD1` with r = 400…900 (m = 5 rank sweep)         |
-| `LDL`    | IR          | IR with cut lazification                             |
-| `D`      | CP          | standalone cutting plane                             |
-| `A`      | Alt-SDP     | alternating SDP                                      |
-| `AD`     | Alt-SDP+CP  | alternating SDP inside the refinement loop           |
-| `PPT`    | DPS         | DPS hierarchy lower bound via Ket.jl                 |
-| `RLT`    | DDPS+       | tensor-RLT lower bound at the sBB root               |
-| `LDual`  | —           | experimental dual ALM                                |
+| code          | what it runs                                          |
+|---------------|-------------------------------------------------------|
+| `Alt-SDP`     | alternating SDP                                       |
+| `LADMM`       | one refinement iteration = LADMM + one CP crossover    |
+| `LADMM_400`…`LADMM_900` | LADMM at factorisation size r (m = 5 sweep) |
+| `CP`          | standalone cutting plane                              |
+| `IR`          | iterative refinement (LADMM + CP, with lazification)  |
+| `DPS`         | DPS hierarchy lower bound via Ket.jl                  |
+| `DDPS+`       | tensor-RLT lower bound at the sBB root                |
+| `DDPS`        | as `DDPS+` with the McCormick families removed        |
+| `CP-DDPS`, `IR-DDPS` | `CP` / `IR` with a DDPS-only oracle            |
+| `IR-nolazy`, `IR-clear` | IR variants not named in the paper          |
+| `Alt-SDP+CP`  | alternating SDP inside the refinement loop            |
+| `DualALM`     | experimental dual ALM, not in the paper               |
+
+The codes are the paper's algorithm names. The shorthand used before they were
+aligned (`A`, `LD1`, `D`, `LDL`, `PPT`, `RLT`, `LDR0`…`LDR5`, …) is still
+accepted on the command line and when reading result files, so the runs
+published with the paper still load; see `LEGACY_ALIASES`.
 
 Each entry maps `(HR, HI, dims, param)` to
 `(glbub, glblb, approxub, approxfeas, approxweights)` in the paper's notation
 `(ub_relx, lb_relx, ub_heur, feas_heur, Σλ)`.
 """
 const ALGORITHMS = Dict{String,Function}(
-    "LD"    => (HR, HI, dims, p) -> detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p),
-    "LDual" => (HR, HI, dims, p) -> detectEntanglementThresholdLiftDual(HR, HI, dims, p),
-    "LDL"   => function (HR, HI, dims, p)
-        p.pool_size = -1
-        p.lazification = true
-        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
-    end,
-    "LD0"   => function (HR, HI, dims, p)
-        p.loop = -2
-        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
-    end,
-    "D"     => function (HR, HI, dims, p)
-        p.maxrounds = -1
-        ub, lb, aub, afeas = detectEntanglementThresholdDiscrete(HR, HI, dims, p)
-        return ub, lb, aub, afeas, 0
-    end,
-    "A"     => function (HR, HI, dims, p)
+    # --- the algorithms compared in the paper ------------------------------
+    "Alt-SDP" => function (HR, HI, dims, p)
         p.heur_alternate_iter = -1
         p.heur_alternate1_iter = -1
         p.heur_alternate_maxfail = 1
         ub, lb, aub, afeas = detectEntanglementThresholdAlternate(HR, HI, dims, p)
         return ub, lb, aub, afeas, 0
     end,
-    "AD"    => (HR, HI, dims, p) -> detectEntanglementThresholdHybridSingle(HR, HI, dims, p),
-    "PPT"   => (HR, HI, dims, p) -> (0, detectEntanglementThresholdPPT(HR, HI, dims, p), 0, 0, 0),
-    "RLT"   => (HR, HI, dims, p) -> (0, detectEntanglementThresholdRLT(HR, HI, dims, p), 0, 0, 0),
+    "LADMM"   => function (HR, HI, dims, p)
+        p.loop = -3                       # one IR iteration = LADMM + crossover
+        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
+    end,
+    "CP"      => function (HR, HI, dims, p)
+        p.maxrounds = -1
+        ub, lb, aub, afeas = detectEntanglementThresholdDiscrete(HR, HI, dims, p)
+        return ub, lb, aub, afeas, 0
+    end,
+    "IR"      => function (HR, HI, dims, p)
+        p.pool_size = -1
+        p.lazification = true
+        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
+    end,
+    "DPS"     => (HR, HI, dims, p) -> (0, detectEntanglementThresholdPPT(HR, HI, dims, p), 0, 0, 0),
+    "DDPS+"   => (HR, HI, dims, p) -> (0, detectEntanglementThresholdRLT(HR, HI, dims, p), 0, 0, 0),
+
+    # --- variants not given a name in the paper ----------------------------
+    "IR-nolazy"  => (HR, HI, dims, p) -> detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p),
+    "IR-clear"   => function (HR, HI, dims, p)
+        p.loop = -2                       # one IR iteration, active set cleared
+        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
+    end,
+    "Alt-SDP+CP" => (HR, HI, dims, p) -> detectEntanglementThresholdHybridSingle(HR, HI, dims, p),
+    "DualALM"    => (HR, HI, dims, p) -> detectEntanglementThresholdLiftDual(HR, HI, dims, p),
 )
+
+"""
+Codes used before the algorithm names were aligned with the paper. Accepted on
+the command line and when reading result files, so the runs published with the
+paper -- whose filenames carry the old codes -- still resolve.
+"""
+const LEGACY_ALIASES = Dict(
+    "A" => "Alt-SDP", "LD1" => "LADMM", "D" => "CP", "LDL" => "IR",
+    "PPT" => "DPS", "RLT" => "DDPS+",
+    "LD" => "IR-nolazy", "LD0" => "IR-clear", "AD" => "Alt-SDP+CP",
+    "LDual" => "DualALM",
+    "RLT_DDPS" => "DDPS", "D_DDPS" => "CP-DDPS", "LDL_DDPS" => "IR-DDPS",
+    ("LDR$(i-1)" => "LADMM_$r" for (i, r) in enumerate((400, 500, 600, 700, 800, 900)))...,
+)
+
+"""
+    resolveAlgorithm(code) -> String
+
+Canonical name for `code`, accepting the legacy shorthand.
+"""
+resolveAlgorithm(code::AbstractString) = get(LEGACY_ALIASES, code, String(code))
+
 """
     withRelaxation(code, mode)
 
-Register `<code>_DDPS`: the same algorithm as `code` but with the sBB oracle
-using the plain DDPS relaxation instead of DDPS+. Running both gives the
-DDPS vs DDPS+ comparison directly.
+The same algorithm with the sBB oracle restricted to the plain DDPS
+relaxation. Running both gives the DDPS vs DDPS+ comparison directly.
 """
 function withRelaxation(code::String, mode::Symbol)
     base = ALGORITHMS[code]
@@ -161,26 +198,22 @@ function withRelaxation(code::String, mode::Symbol)
     end
 end
 
-# LD1 and the rank sweep are all "one IR iteration, keep the active set".
-for code in ("LD1", keys(RANK_SWEEP)...)
-    ALGORITHMS[code] = function (HR, HI, dims, p)
-        p.loop = -3
-        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
-    end
+# The rank sweep is LADMM at a fixed factorisation size; the size itself is
+# applied by applySizePreset! from RANK_SWEEP.
+for code in keys(RANK_SWEEP)
+    ALGORITHMS[code] = ALGORITHMS["LADMM"]
 end
 
-# DDPS-only counterparts, for the ablation against DDPS+:
-#   RLT_DDPS  the root lower bound from DDPS alone (vs RLT = DDPS+)
-#   D_DDPS    cutting plane with a DDPS oracle    (vs D)
-#   LDL_DDPS  iterative refinement with a DDPS oracle (vs LDL)
-for code in ("RLT", "D", "LDL")
-    ALGORITHMS[code * "_DDPS"] = withRelaxation(code, :ddps)
-end
+# DDPS-only counterparts, for the ablation against DDPS+. The paper calls the
+# unstrengthened outer approximation simply DDPS.
+ALGORITHMS["DDPS"]    = withRelaxation("DDPS+", :ddps)
+ALGORITHMS["CP-DDPS"] = withRelaxation("CP", :ddps)
+ALGORITHMS["IR-DDPS"] = withRelaxation("IR", :ddps)
 
 function runEntangle(args)
     println("Loading benchmark data from: $(args["state"])")
     data = loadBenchmark(args["state"])
-    algo = args["algo"]
+    algo = resolveAlgorithm(args["algo"])
 
     param = Param(
         solver = "MSK",

@@ -10,9 +10,9 @@ exp_ddps_ablation.sh, so no run is duplicated.
 """
 from .common import bounds_block
 
-ROWS = [("RLT_DDPS", "DDPS", True),       ("RLT", "DDPS+", True),
-        ("D_DDPS", "CP (DDPS)", True),    ("D", "CP (DDPS+)", True),
-        ("LDL_DDPS", "IR (DDPS)", True),  ("LDL", "IR (DDPS+)", True)]
+ROWS = [("DDPS", "DDPS", True),          ("DDPS+", "DDPS+", True),
+        ("CP-DDPS", "CP (DDPS)", True),  ("CP", "CP (DDPS+)", True),
+        ("IR-DDPS", "IR (DDPS)", True),  ("IR", "IR (DDPS+)", True)]
 
 TABLES = {f"ddps{m}": dict(m=m, rows=ROWS, experiment="exp_ddps_ablation.sh")
           for m in (3, 4, 5)}

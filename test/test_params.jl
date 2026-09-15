@@ -19,11 +19,14 @@ const E = ExactEntanglement
         # an explicit positive time limit is respected
         q = Param(time_limit = 42.0); E.applySizePreset!(q, 3, "LD1")
         @test q.time_limit == 42.0
-        # the LDR rank sweep applies only at m == 5
-        q5 = Param(time_limit = -1.0); E.applySizePreset!(q5, 5, "LDR3")
+        # the rank sweep applies only at m == 5
+        q5 = Param(time_limit = -1.0); E.applySizePreset!(q5, 5, "LADMM_700")
         @test q5.rank_bound == 700
-        q3 = Param(time_limit = -1.0); E.applySizePreset!(q3, 3, "LDR3")
+        q3 = Param(time_limit = -1.0); E.applySizePreset!(q3, 3, "LADMM_700")
         @test q3.rank_bound == 266
+        # a legacy code selects the same r, since the preset resolves aliases
+        q5l = Param(time_limit = -1.0); E.applySizePreset!(q5l, 5, "LDR3")
+        @test q5l.rank_bound == 700
     end
 
     @testset "run clock" begin
@@ -57,4 +60,20 @@ end
     @test cls(ITERATION_LIMIT, MOI.FEASIBLE_POINT, MOI.FEASIBLE_POINT; po = 1.0, du = 2.0) == E.RelaxInfeasible
     @test cls(ITERATION_LIMIT, MOI.FEASIBLE_POINT, MOI.FEASIBLE_POINT; po = 1.0, du = 1.0) == E.RelaxFeasible
     @test cls(TIME_LIMIT, MOI.FEASIBLE_POINT, MOI.FEASIBLE_POINT) == E.RelaxError
+
+    @testset "algorithm names follow the paper" begin
+        for name in ("Alt-SDP", "LADMM", "CP", "IR", "DPS", "DDPS+")
+            @test haskey(E.ALGORITHMS, name)
+        end
+        for r in (400, 500, 600, 700, 800, 900)
+            @test haskey(E.ALGORITHMS, "LADMM_$r")
+        end
+        # every legacy code resolves to a registered algorithm
+        for (old, new) in E.LEGACY_ALIASES
+            @test E.resolveAlgorithm(old) == new
+            @test haskey(E.ALGORITHMS, new)
+        end
+        # an unknown code passes through untouched, so the error names it
+        @test E.resolveAlgorithm("nosuch") == "nosuch"
+    end
 end

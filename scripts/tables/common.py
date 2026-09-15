@@ -15,6 +15,17 @@ TRACE_DIRS = [os.path.join(d, "traces") for d in RESULT_DIRS]
 # every cell resolved in this process, for --manifest
 PROVENANCE = {}
 
+# Filenames of the runs published with the paper carry the codes used before
+# the algorithm names were aligned with it. Kept in sync with LEGACY_ALIASES in
+# src/Drivers.jl (inverted: canonical -> the old code to also look for).
+LEGACY_CODE = {
+    "Alt-SDP": "A", "LADMM": "LD1", "CP": "D", "IR": "LDL",
+    "DPS": "PPT", "DDPS+": "RLT",
+    "IR-nolazy": "LD", "IR-clear": "LD0", "Alt-SDP+CP": "AD", "DualALM": "LDual",
+    "DDPS": "RLT_DDPS", "CP-DDPS": "D_DDPS", "IR-DDPS": "LDL_DDPS",
+    **{f"LADMM_{r}": f"LDR{i}" for i, r in enumerate((400, 500, 600, 700, 800, 900))},
+}
+
 
 class Context:
     """Search paths and benchmark metadata shared by all generators."""
@@ -55,9 +66,12 @@ def load_result(results_dirs, state, algo):
     """First matching raw file across the search path, or None."""
     if isinstance(results_dirs, str):
         results_dirs = [results_dirs]
-    path = next((os.path.join(d, f"{state}_{algo}")
-                 for d in results_dirs
-                 if os.path.isfile(os.path.join(d, f"{state}_{algo}"))), None)
+    names = [algo]
+    if algo in LEGACY_CODE:
+        names.append(LEGACY_CODE[algo])          # a run published before the rename
+    path = next((os.path.join(d, f"{state}_{n}")
+                 for d in results_dirs for n in names
+                 if os.path.isfile(os.path.join(d, f"{state}_{n}"))), None)
     if path is None:
         return None
     PROVENANCE[(state, algo)] = os.path.relpath(path, ROOT)
@@ -90,9 +104,10 @@ def load_trace_means(trace_dirs, state, algo):
     """Mean ub_relx / lb_relx / b_lower over the gap-closing CP iterations."""
     if isinstance(trace_dirs, str):
         trace_dirs = [trace_dirs]
-    path = next((os.path.join(d, f"{state}_{algo}.cp.csv")
-                 for d in trace_dirs
-                 if os.path.isfile(os.path.join(d, f"{state}_{algo}.cp.csv"))), None)
+    names = [algo] + ([LEGACY_CODE[algo]] if algo in LEGACY_CODE else [])
+    path = next((os.path.join(d, f"{state}_{n}.cp.csv")
+                 for d in trace_dirs for n in names
+                 if os.path.isfile(os.path.join(d, f"{state}_{n}.cp.csv"))), None)
     if path is None:
         return None
     PROVENANCE[(state, algo + " [trace]")] = os.path.relpath(path, ROOT)

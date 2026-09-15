@@ -313,17 +313,26 @@ matplotlib is not a dependency: the plot scripts emit whitespace-separated
 The `-a` codes are a stable contract — `results/` filenames and the analysis
 scripts key off them.
 
-| code | paper name | |
-|------|------------|---|
-| `LD` / `LD0` / `LDL` | IR | iterative refinement |
-| `LD1` | LADMM | one refinement iteration = standalone LADMM + crossover |
-| `LDR0`…`LDR5` | LADMM_r | r = 400…900 (m = 5) |
-| `D` | CP | cutting plane |
-| `A` | Alt-SDP | alternating SDP |
-| `AD` | Alt-SDP + CP | |
-| `PPT` | DPS | DPS hierarchy bound via Ket.jl |
-| `RLT` | DDPS+ | tensor-RLT bound at the sBB root |
-| `RLT_DDPS`, `D_DDPS`, `LDL_DDPS` | — | DDPS-only counterparts, for the ablation |
+| code | what it runs |
+|------|--------------|
+| `Alt-SDP` | alternating SDP |
+| `LADMM` | one refinement iteration = LADMM + one CP crossover |
+| `LADMM_400`…`LADMM_900` | LADMM at factorisation size r (m = 5 sweep) |
+| `CP` | standalone cutting plane |
+| `IR` | iterative refinement (LADMM + CP) |
+| `DPS` | DPS hierarchy lower bound via Ket.jl |
+| `DDPS+` | tensor-RLT lower bound at the sBB root |
+| `DDPS`, `CP-DDPS`, `IR-DDPS` | DDPS-only counterparts, for the ablation |
+| `Alt-SDP+CP`, `IR-nolazy`, `IR-clear`, `DualALM` | variants not named in the paper |
+
+The codes **are** the paper's algorithm names, so a table row and the file that
+backs it carry the same label.
+
+The shorthand used before the rename — `A`, `LD1`, `D`, `LDL`, `PPT`, `RLT`,
+`LDR0`…`LDR5` — is still accepted on the command line and when reading result
+files, so the runs published with the paper still load without being renamed.
+New runs are written under the canonical name, so `-a RLT` produces
+`state_133.jl_DDPS+`.
 
 ### What each run records
 

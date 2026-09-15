@@ -14,7 +14,7 @@ import sys
 
 from .common import escape, label_of, load_trace_means
 
-ROWS = [("D", "CP", True), ("LDL", "IR", True)]
+ROWS = [("CP", "CP", True), ("IR", "IR", True)]
 
 TABLES = {"m5cp": dict(m=5, rows=ROWS, experiment="exp_main.sh")}
 

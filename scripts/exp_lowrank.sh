@@ -13,6 +13,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 parse_args "$@"
 set_part lowrank
 
-run_table "lowrank_m5" 5 LDR0 LDR1 LDR2 LDR3 LDR4 LDR5 || exit 1
+run_table "lowrank_m5" 5 LADMM_400 LADMM_500 LADMM_600 LADMM_700 LADMM_800 LADMM_900 || exit 1
 echo
 echo "analysis:  python3 scripts/make_tables.py --table m5low"

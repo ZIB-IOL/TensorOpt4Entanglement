@@ -15,7 +15,7 @@ import sys
 
 from .common import escape, label_of, load_result
 
-ROWS = [("RLT", "DDPS+", True), ("RLT_DDPS", "DDPS", True)]
+ROWS = [("DDPS+", "DDPS+", True), ("DDPS", "DDPS", True)]
 
 TABLES = {f"size{m}": dict(m=m, rows=ROWS, experiment="exp_main.sh") for m in (3, 4, 5)}
 

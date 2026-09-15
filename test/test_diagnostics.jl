@@ -41,10 +41,10 @@ const E = ExactEntanglement
         @test E.peakRSSMiB() > 0
     end
 
-    @testset "every DDPS algorithm code has a DDPS+ counterpart" begin
-        for code in ("RLT", "D", "LDL")
-            @test haskey(E.ALGORITHMS, code)
-            @test haskey(E.ALGORITHMS, code * "_DDPS")
+    @testset "every DDPS+ algorithm has a DDPS counterpart" begin
+        for (plus, plain) in ("DDPS+" => "DDPS", "CP" => "CP-DDPS", "IR" => "IR-DDPS")
+            @test haskey(E.ALGORITHMS, plus)
+            @test haskey(E.ALGORITHMS, plain)
         end
     end
 
