@@ -168,6 +168,26 @@ by running the same command again; only the missing jobs are queued. `--force`
 ignores existing results and redoes everything. When nothing is left to do,
 nothing is submitted.
 
+### Running one part
+
+The three parts are named after their scripts — `main`, `lowrank`,
+`ddps_ablation` — and `runjobs.sh` discovers them by globbing `scripts/exp_*.sh`,
+so `--help` always lists what actually exists.
+
+```bash
+bash runjobs.sh main                      # one part
+bash runjobs.sh lowrank ddps_ablation     # two
+bash scripts/exp_lowrank.sh               # or call the part script directly
+```
+
+Every mode takes a part subset: `--local`, `--dry-run`, `--force` and `--check`
+all accept one. An unknown name is rejected with the list of valid ones.
+
+> `--check` is a **global** audit — it asks "if I submit this, will every table
+> have data?". With a part subset it will therefore report the tables the other
+> parts would have filled, and exit non-zero. That is the intended answer; run
+> it without a subset for a meaningful pass.
+
 ### Running part of an experiment
 
 Every level of granularity, from the whole suite down to one job:
