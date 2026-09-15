@@ -14,6 +14,20 @@ Short instructions to install the Julia packages this project uses and to reprod
 > julia +1.11.6 --project=. -e 'using Pkg; Pkg.instantiate()'
 > ```
 
+> **Optional: a project-local Julia depot.** Create `.julia_depot/` in the repo
+> and `runjobs.sh` will use it instead of `~/.julia`:
+> ```bash
+> mkdir .julia_depot
+> julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+> ```
+> This isolates the run from a shared `~/.julia` that may have drifted from
+> `Manifest.toml`, and keeps the packages on the same filesystem as the repo —
+> useful when `$HOME` has a quota. The first run installs everything into it
+> (a few GB), so expect one slow start. The path is always made absolute;
+> a *relative* `JULIA_DEPOT_PATH` resolves against each job's working
+> directory, which is why the earlier `.julia_depot` default was removed.
+> `scripts/check_env.sh` reports which depot is actually in use.
+
 > **Mosek.jl must be able to find the solver library.** Its build reads
 > `MOSEKBINDIR` (not `MOSEKHOME`) and bakes the resolved path into `deps.jl`,
 > so if that path later disappears every run fails with

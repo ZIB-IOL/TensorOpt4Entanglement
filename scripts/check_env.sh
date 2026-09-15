@@ -36,12 +36,41 @@ echo "== project =="
 [[ -f Project.toml ]] && pass "Project.toml present" || fail "Project.toml missing - wrong directory?"
 n=$(ls benchmark/*.jl 2>/dev/null | wc -l)
 [[ $n -gt 0 ]] && pass "$n benchmark instances" || fail "no benchmark instances in benchmark/"
+# which depot will actually be used, and does it hold the packages?
 if [[ -n "${JULIA_DEPOT_PATH:-}" ]]; then
     d="${JULIA_DEPOT_PATH%%:*}"
-    mkdir -p "$d" 2>/dev/null && [[ -w "$d" ]] && pass "depot writable: $d" || fail "depot not writable: $d"
+    case "$JULIA_DEPOT_PATH" in
+        /*) : ;;
+        *)  note "JULIA_DEPOT_PATH is relative ('$JULIA_DEPOT_PATH'); it resolves against each job's working directory" ;;
+    esac
+    case "$JULIA_DEPOT_PATH" in
+        *:) note "JULIA_DEPOT_PATH ends in ':', so the default depots are appended and ~/.julia is still used" ;;
+    esac
+elif [[ -d "$PWD/.julia_depot" ]]; then
+    d="$PWD/.julia_depot"
+    pass "project-local depot in use: .julia_depot/"
+else
+    d="$HOME/.julia"
+    note "using the default depot $d (create .julia_depot/ here for a project-local one)"
+fi
+if [[ -d "$d" ]]; then
+    [[ -w "$d" ]] && pass "depot writable: $d" || fail "depot not writable: $d"
+else
+    parent="$(dirname "$d")"
+    [[ -w "$parent" ]] && pass "depot $d will be created on first use" \
+                       || fail "cannot create depot $d ($parent not writable)"
+fi
+if [[ -d "$d/packages/Mosek" ]]; then
+    pass "Mosek package present in the depot"
+else
+    note "no Mosek package in $d yet - the first run will install it"
 fi
 for d in results joblists outputs; do
-    mkdir -p "$d" 2>/dev/null && [[ -w "$d" ]] && pass "writable: $d/" || fail "not writable: $d/"
+    if [[ -d "$d" ]]; then
+        [[ -w "$d" ]] && pass "writable: $d/" || fail "not writable: $d/"
+    else
+        [[ -w . ]] && pass "$d/ will be created on first use" || fail "cannot create $d/"
+    fi
 done
 avail=$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')
 [[ -n "$avail" && "$avail" -ge 5 ]] && pass "${avail} GiB free" || note "only ${avail:-?} GiB free"

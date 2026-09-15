@@ -92,10 +92,25 @@ if [[ -z "${MOSEKBINDIR:-}" ]]; then
     done
 fi
 
-# JULIA_DEPOT_PATH is deliberately NOT defaulted: the old value was the
-# relative ".julia_depot", which resolves against each job's working directory
-# and silently hides an already-populated ~/.julia. Set it yourself, to an
-# absolute path, if you want a project-local depot.
+# Project-local Julia depot, opt-in by creating the directory:
+#
+#     mkdir .julia_depot && bash runjobs.sh ...
+#
+# This isolates the run from ~/.julia (useful when $HOME has a quota, or when a
+# shared depot has drifted from Manifest.toml) and keeps the packages on the
+# same filesystem as the repo. The first run then installs everything into it.
+#
+# The path is made ABSOLUTE: the old value was the relative ".julia_depot",
+# which resolves against each job's working directory rather than the repo, and
+# silently shadowed an already-populated ~/.julia.
+if [[ -n "${JULIA_DEPOT_PATH:-}" ]]; then
+    case "$JULIA_DEPOT_PATH" in
+        /*|*:*) : ;;                                   # absolute, or a list the user built
+        *) export JULIA_DEPOT_PATH="$PWD/$JULIA_DEPOT_PATH" ;;
+    esac
+elif [[ -d "$PWD/.julia_depot" ]]; then
+    export JULIA_DEPOT_PATH="$PWD/.julia_depot"
+fi
 
 # Only a real submission needs the packages resolved up front; --dry-run and
 # --check must not pay for a full instantiate/precompile.
