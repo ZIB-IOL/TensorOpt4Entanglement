@@ -269,8 +269,11 @@ run_table() {
             echo "queued $added job(s), skipped $skipped already done; $joblist now has $n"
         fi
         if [[ $n -gt 0 ]]; then
-            echo "submit with:"
-            echo "  JOB_LIST=$(basename "$joblist") sbatch --array=1-$n run.slurm"
+            # runjobs.sh submits this itself; the line is for submitting by hand.
+            # It must carry the path run.slurm will resolve from the submission
+            # directory -- a bare basename fails with "job list not found".
+            echo "runjobs.sh submits this; by hand it would be:"
+            echo "  JOB_LIST=joblists/$(basename "$joblist") sbatch --array=1-$n run.slurm"
         fi
         return 0
     fi
