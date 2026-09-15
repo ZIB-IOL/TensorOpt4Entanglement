@@ -174,11 +174,14 @@ echo "== slurm =="
 if command -v sbatch >/dev/null 2>&1; then
     pass "sbatch present"
     part=$(grep -oP '^#SBATCH --partition=\K\S+' run.slurm)
-    cons=$(grep -oP '^#SBATCH --constraint=\K\S+' run.slurm)
+    cons=$(grep -oP '^#SBATCH --constraint=\K\S+' run.slurm || true)
     if command -v sinfo >/dev/null 2>&1; then
         sinfo -h -p "$part" >/dev/null 2>&1 && [[ -n "$(sinfo -h -p "$part" 2>/dev/null)" ]] \
             && pass "partition '$part' exists" || fail "partition '$part' not found (edit run.slurm)"
-        if [[ -n "$(sinfo -h -p "$part" -o '%f' 2>/dev/null | tr ',' '\n' | grep -Fx "$cons")" ]]; then
+        # no --constraint is the normal case; only check one that is set
+        if [[ -z "$cons" ]]; then
+            :
+        elif [[ -n "$(sinfo -h -p "$part" -o '%f' 2>/dev/null | tr ',' '\n' | grep -Fx "$cons")" ]]; then
             pass "constraint '$cons' offered by '$part'"
         else
             note "no node in '$part' advertises feature '$cons'; jobs may queue forever"
