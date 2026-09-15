@@ -17,14 +17,14 @@
 # Produces tab.ddps3 / ddps4 / ddps5.  Results -> results/ddps/
 #
 # Usage:
-#   bash scripts/exp_ddps_ablation.sh          # m = 3 and 4
-#   M="3 4 5" bash scripts/exp_ddps_ablation.sh
+#   bash scripts/exp_ddps_ablation.sh          # m = 3, 4 and 5
+#   M="3 4"   bash scripts/exp_ddps_ablation.sh   # skip the expensive size
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 parse_args "$@"
 set_part ddps
 
-M="${M:-3 4}"
+M="${M:-3 4 5}"
 failed=0
 for m in $M; do
     run_table "ddps_m${m}" "$m" RLT_DDPS D_DDPS LDL_DDPS || failed=$((failed+1))

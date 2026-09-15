@@ -31,9 +31,10 @@ PARTS=(); FLAGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --local)      MODE=local; shift ;;
+        --check)      MODE=check; shift ;;
         --dry-run|-n) MODE=dry; shift ;;
         -h|--help)
-            echo "Usage: $(basename "$0") [parts...] [--local|--dry-run] [options]"
+            echo "Usage: $(basename "$0") [parts...] [--local|--dry-run|--check] [options]"
             echo "  parts: ${ALL[*]}   (default: all)"
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
@@ -45,6 +46,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ ${#PARTS[@]} -eq 0 ]] && PARTS=("${ALL[@]}")
+
+if [[ "$MODE" == "check" ]]; then
+    # generate the lists without submitting, then audit table coverage
+    rm -f job_list_*.txt
+    for part in "${PARTS[@]}"; do
+        USE_SLURM=1 FORCE=1 bash "scripts/exp_${part}.sh" >/dev/null 2>&1
+    done
+    python3 scripts/check_coverage.py
+    exit $?
+fi
 
 if [[ "$MODE" == "slurm" || "$MODE" == "dry" ]]; then
     export LC_ALL=C

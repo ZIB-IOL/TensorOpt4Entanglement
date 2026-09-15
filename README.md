@@ -144,7 +144,7 @@ directory, so every raw file is attributable to the run that produced it.
 |---|---|---|---|
 | `scripts/exp_main.sh` | all instances × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+} | `results/main/` | ~210 CPU-h |
 | `scripts/exp_lowrank.sh` | m=5 × LADMM with r = 400…900 | `results/lowrank/` | ~72 CPU-h |
-| `scripts/exp_ddps_ablation.sh` | m=3,4 × the DDPS-only variants | `results/ddps/` | ~44 CPU-h |
+| `scripts/exp_ddps_ablation.sh` | m=3,4,5 × the DDPS-only variants | `results/ddps/` | ~80 CPU-h |
 
 
 ```bash
@@ -156,6 +156,7 @@ bash runjobs.sh --local                # run here instead, sequentially
 bash runjobs.sh --dry-run              # show what would happen, do nothing
 bash runjobs.sh --local main -t 60     # smoke test (not paper settings)
 bash runjobs.sh --force                # redo every experiment
+bash runjobs.sh --check                # verify every table cell is covered
 bash runjobs.sh --help                 # all options
 
 bash scripts/exp_main.sh               # or run one experiment directly
@@ -165,6 +166,10 @@ Finished jobs are skipped, so an interrupted run resumes. `M="3"` restricts an
 experiment to one subsystem count.
 
 ### One entry point, two destinations
+
+`runjobs.sh --check` audits the generated job lists against every table and
+fails if any cell would be left without data, so a missing experiment is caught
+before cluster time is spent rather than after.
 
 `runjobs.sh` decides only *where* the experiments run; the design lives in
 `scripts/exp_*.sh`. So the cluster and a local machine execute exactly the same
