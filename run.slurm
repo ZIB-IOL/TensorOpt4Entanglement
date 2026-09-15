@@ -48,15 +48,21 @@ PARAM=$(sed -n "${LINENUM}p" "$JOB_LIST")
 read -r instance algorithm timelimit resultsdir <<< "$PARAM"
 juliabin="${JULIA_BIN:-julia}"
 
-mkdir -p outputs
+# Log beside the results, exactly where a --local run puts it, so a job's
+# output is in one predictable place however it was started. outputs/ is the
+# fallback for a job list that carries no results directory.
+logfile="outputs/output_${instance}_${algorithm}.out"
 if [[ -n "$resultsdir" ]]; then
     export EXACTENT_RESULTS_DIR="$resultsdir"
     export EXACTENT_TRACE="$resultsdir/traces/${instance}_${algorithm}"
-    mkdir -p "$resultsdir/traces"
+    mkdir -p "$resultsdir/traces" "$resultsdir/logs"
+    logfile="$resultsdir/logs/${instance}_${algorithm}.log"
+else
+    mkdir -p outputs
 fi
 
 echo "$juliabin --project=. scripts/run_experiment.jl -s $instance -a $algorithm -t $timelimit"
 # unquoted: JULIA_BIN may be a juliaup selector ("julia +1.11.6"), which has to split
 srun $juliabin --project=. scripts/run_experiment.jl \
      -s "$instance" -a "$algorithm" -t "$timelimit" \
-     > "outputs/output_${instance}_${algorithm}.out" 2>&1
+     > "$logfile" 2>&1
