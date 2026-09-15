@@ -146,12 +146,35 @@ const ALGORITHMS = Dict{String,Function}(
     "PPT"   => (HR, HI, dims, p) -> (0, detectEntanglementThresholdPPT(HR, HI, dims, p), 0, 0, 0),
     "RLT"   => (HR, HI, dims, p) -> (0, detectEntanglementThresholdRLT(HR, HI, dims, p), 0, 0, 0),
 )
+"""
+    withRelaxation(code, mode)
+
+Register `<code>_DDPS`: the same algorithm as `code` but with the sBB oracle
+using the plain DDPS relaxation instead of DDPS+. Running both gives the
+DDPS vs DDPS+ comparison directly.
+"""
+function withRelaxation(code::String, mode::Symbol)
+    base = ALGORITHMS[code]
+    return function (HR, HI, dims, p)
+        p.relaxation = mode
+        base(HR, HI, dims, p)
+    end
+end
+
 # LD1 and the rank sweep are all "one IR iteration, keep the active set".
 for code in ("LD1", keys(RANK_SWEEP)...)
     ALGORITHMS[code] = function (HR, HI, dims, p)
         p.loop = -3
         detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
     end
+end
+
+# DDPS-only counterparts, for the ablation against DDPS+:
+#   RLT_DDPS  the root lower bound from DDPS alone (vs RLT = DDPS+)
+#   D_DDPS    cutting plane with a DDPS oracle    (vs D)
+#   LDL_DDPS  iterative refinement with a DDPS oracle (vs LDL)
+for code in ("RLT", "D", "LDL")
+    ALGORITHMS[code * "_DDPS"] = withRelaxation(code, :ddps)
 end
 
 function runEntangle(args)
@@ -190,10 +213,22 @@ function runEntangle(args)
         println("  maxrounds = $(param.maxrounds)")
     end
 
+    param.relaxation = Symbol(get(args, "relaxation", "ddpsplus"))
+    param.relaxation in (:ddps, :ddpsplus) ||
+        error("--relaxation must be ddps or ddpsplus, got $(param.relaxation)")
+    param.seed = get(args, "seed", param.seed)
+
     Random.seed!(param.seed)
     applySizePreset!(param, length(dims), algo)
 
     haskey(ALGORITHMS, algo) || error("unknown algorithm $algo; expected one of $(sort(collect(keys(ALGORITHMS))))")
+
+    # Size of the sBB root relaxation, measured without solving it.
+    stats = relaxationStats(HR, HI, dims, param)
+    if param.log_level > 0
+        println("Root relaxation: $(stats.nvars) vars, $(stats.ncons) constraints, ",
+                "$(stats.nnz) nonzeros (built in $(round(stats.build_s, digits=2)) s)")
+    end
     glbub, glblb, approxub, approxfeas, approxweights = Inf, -Inf, Inf, 0.0, 0
     elapsed_time = @elapsed begin
         glbub, glblb, approxub, approxfeas, approxweights = ALGORITHMS[algo](HR, HI, dims, param)
@@ -212,6 +247,16 @@ function runEntangle(args)
         println(io, "glblb: $glblb")
         println(io, "approxweights: $approxweights")
         println(io, "time: $elapsed_time")
+        # provenance: what was run, and with which settings
+        println(io, "relaxation: $(param.relaxation)")
+        println(io, "seed: $(param.seed)")
+        println(io, "julia: $(VERSION)")
+        println(io, "host: $(gethostname())")
+        # size and memory (see Diagnostics.jl)
+        println(io, "relax_nvars: $(stats.nvars)")
+        println(io, "relax_ncons: $(stats.ncons)")
+        println(io, "relax_nnz: $(stats.nnz)")
+        println(io, "peak_rss_mib: $(round(peakRSSMiB(), digits=1))")
     end
     println("Results saved to $result_file")
     println("Processing complete!")

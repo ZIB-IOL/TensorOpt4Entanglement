@@ -42,6 +42,18 @@ else
                 @test 0 < readbound("state_133.jl_A", "glbub") < 1
             end
 
+            @testset "GHZ bounds respect the analytic threshold" begin
+                # the m-party GHZ white-noise threshold is known in closed form
+                ghz(m) = 1 - 1 / (1 + 2.0^(m - 1))
+                @test ghz(3) ≈ 0.8
+                ghzargs = merge(args("RLT"), Dict{String,Any}("state" => "state_033.jl"))
+                @test runEntangle(ghzargs) == 0
+                lb = readbound("state_033.jl_RLT", "glblb")
+                # DDPS+ is a relaxation, so its lower bound cannot exceed the truth
+                @test lb <= ghz(3) + 1e-6
+                @test lb > 0.5                      # and it is not vacuous
+            end
+
             @testset "the bounds bracket each other" begin
                 # DDPS+ lower bound must not exceed the Alt-SDP upper bound
                 @test readbound("state_133.jl_RLT", "glblb") <=

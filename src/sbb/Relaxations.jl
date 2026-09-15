@@ -323,22 +323,27 @@ function addComplexMcCormickConstraints(stateseparator::StateSeparator, optmodel
 end
 
 """
-    strengthenRelaxation(stateseparator, optmodel, focusnode; usepartial, usecomplexmc)
+    strengthenRelaxation(stateseparator, optmodel, focusnode)
 
-Tighten a base relaxation with the valid inequalities of the paper: node bounds,
-tensor McCormick PSD cuts, scalar complex McCormick cuts, and partial-trace
-consistency between a node and its children.
+Tighten a base relaxation with the valid inequalities of the paper. Which ones
+are added depends on `param.relaxation`:
+
+  `:ddps`     node bounds and partial-trace consistency between a node and its
+              children -- the DDPS outer approximation on its own
+  `:ddpsplus` the above plus the tensor McCormick PSD cuts and the scalar
+              complex McCormick cuts
+
+The `:ddpsplus` path adds constraints in exactly the order it always has, so
+that mode is unchanged by the introduction of `:ddps`.
 """
-function strengthenRelaxation(stateseparator::StateSeparator, optmodel::OptModel, focusnode::Node;
-                              usepartial = true, usecomplexmc = true)
-    applyBounds(stateseparator, optmodel, focusnode )
-    addTensorMcCormickConstraints(stateseparator, optmodel, focusnode)
-    if usecomplexmc
-        addComplexMcCormickConstraints(stateseparator, optmodel, focusnode )
+function strengthenRelaxation(stateseparator::StateSeparator, optmodel::OptModel, focusnode::Node)
+    plus = stateseparator.param.relaxation === :ddpsplus
+    applyBounds(stateseparator, optmodel, focusnode)
+    if plus
+        addTensorMcCormickConstraints(stateseparator, optmodel, focusnode)
+        addComplexMcCormickConstraints(stateseparator, optmodel, focusnode)
     end
-    if usepartial
-        addPartialTraceConstraints(stateseparator, optmodel, focusnode)
-    end
+    addPartialTraceConstraints(stateseparator, optmodel, focusnode)
 end
 
 function initRelaxationThreshold(stateseparator::StateSeparator, focusnode::Node)

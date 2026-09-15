@@ -143,6 +143,8 @@ them all. Finished jobs are skipped, so an interrupted run can be restarted.
 | `scripts/table_m5.sh` | `tab.m5` | m=5: 4 states x same 6 algorithms, 3 h limit |
 | `scripts/table_m5_lowrank.sh` | `tab.m5low` | m=5: LADMM with r = 400…900 |
 | `scripts/table_m5_gapclosing.sh` | `tab.m5CP` | m=5: CP and IR, averaged over gap-closing iterations |
+| `scripts/table_ddps.sh` | `ddps3`/`ddps4`/`ddps5` | DDPS vs DDPS+ ablation of the sBB oracle |
+| `scripts/experiment_convergence.sh` | — | bound-convergence trajectories |
 | `scripts/run_all_tables.sh` | all of the above | |
 
 ```bash
@@ -174,6 +176,59 @@ new benchmark automatically joins the right table.
 
 `TIME_LIMIT=-1` (the default) lets the code apply the paper's per-size limits
 of 1/2/3 hours for m=3/4/5.
+
+### DDPS vs DDPS+
+
+DDPS+ *is* the relaxation the sBB oracle uses: `initRelaxationNode` (the oracle)
+and `initRelaxationThreshold` (the `RLT` bound) call the same
+`strengthenRelaxation`. `--relaxation ddps` restricts it to the DDPS outer
+approximation alone — node bounds plus partial-trace consistency, without the
+tensor and scalar McCormick families — so the contribution of the `+` can be
+measured:
+
+```bash
+bash scripts/table_ddps.sh                    # runs both variants, m = 3 and 4
+python3 scripts/make_tables.py --table ddps3
+```
+
+The algorithm codes `RLT_DDPS`, `D_DDPS` and `LDL_DDPS` are the DDPS-only
+counterparts of `RLT`, `D` and `LDL`. `ddpsplus` is the default everywhere, so
+existing behaviour is unchanged.
+
+### Problem size and memory
+
+Every run records the size of the sBB root relaxation and the peak resident set
+size, in the result file:
+
+```
+relax_nvars: 92      variables in the root relaxation
+relax_ncons: 1040    constraints
+relax_nnz: 4402      nonzero coefficients
+peak_rss_mib: 1188.9 peak memory of the process
+```
+
+The relaxation is measured **without solving it**, so the three size figures are
+deterministic and machine-independent; only `peak_rss_mib` depends on the host.
+This is on by default; set `EXACTENT_NO_DIAGNOSTICS=1` to skip the extra model
+build. Result files also record `relaxation`, `seed`, `julia` and `host` for
+provenance.
+
+```bash
+python3 scripts/make_tables.py --table size3   # size/memory table
+```
+
+### Bound-convergence trajectories
+
+```bash
+bash scripts/experiment_convergence.sh              # GHZ_3/4/5 x {CP, IR, LADMM}
+python3 scripts/summarize_traces.py                 # text summary
+python3 scripts/summarize_traces.py --out plots/    # pgfplots .dat files
+```
+
+The summary also reports how many CP iterations returned **no** lower bound
+because the sBB oracle terminated early — the quantity behind the
+"LMO early termination" question — and, for GHZ instances, the analytic
+threshold `1 - 1/(1 + 2^(m-1))` as a reference line.
 
 ### Generating the LaTeX
 

@@ -24,6 +24,14 @@ MAIN_ROWS = [("A", "Alt-SDP", False), ("LD1", "LADMM", True), ("D", "CP", True),
 LOWRANK_ROWS = [(f"LDR{i}", f"LADMM\\_{r}", True)
                 for i, r in enumerate((400, 500, 600, 700, 800, 900))]
 GAPCLOSING_ROWS = [("D", "CP", True), ("LDL", "IR", True)]
+# DDPS vs DDPS+ ablation: the same three algorithms with the sBB oracle
+# restricted to the plain DDPS outer approximation, and with the McCormick
+# families added.
+DDPS_ROWS = [("RLT_DDPS", "DDPS", True),      ("RLT", "DDPS+", True),
+             ("D_DDPS", "CP (DDPS)", True),   ("D", "CP (DDPS+)", True),
+             ("LDL_DDPS", "IR (DDPS)", True), ("LDL", "IR (DDPS+)", True)]
+# one representative algorithm per instance is enough for the size table
+SIZE_ROWS = [("RLT", "DDPS+", True), ("RLT_DDPS", "DDPS", True)]
 
 TABLES = {
     "m3":    dict(m=3, rows=MAIN_ROWS,       kind="main"),
@@ -31,6 +39,12 @@ TABLES = {
     "m5":    dict(m=5, rows=MAIN_ROWS,       kind="main"),
     "m5low": dict(m=5, rows=LOWRANK_ROWS,    kind="main"),
     "m5cp":  dict(m=5, rows=GAPCLOSING_ROWS, kind="gapclosing"),
+    "ddps3": dict(m=3, rows=DDPS_ROWS,       kind="main"),
+    "ddps4": dict(m=4, rows=DDPS_ROWS,       kind="main"),
+    "ddps5": dict(m=5, rows=DDPS_ROWS,       kind="main"),
+    "size3": dict(m=3, rows=SIZE_ROWS,       kind="size"),
+    "size4": dict(m=4, rows=SIZE_ROWS,       kind="size"),
+    "size5": dict(m=5, rows=SIZE_ROWS,       kind="size"),
 }
 
 
@@ -58,9 +72,17 @@ def load_result(results_dir, state, algo):
             k, v = line.split(":", 1)
             rec[k.strip()] = v.strip()
     try:
-        return dict(glbub=float(rec["glbub"]), glblb=float(rec["glblb"]),
-                    approxub=float(rec["approxub"]), approxfeas=float(rec["approxfeas"]),
-                    time=float(rec["time"]))
+        out = dict(glbub=float(rec["glbub"]), glblb=float(rec["glblb"]),
+                   approxub=float(rec["approxub"]), approxfeas=float(rec["approxfeas"]),
+                   time=float(rec["time"]))
+        # diagnostics are absent from results produced before they were added
+        for k, cast in (("relax_nvars", int), ("relax_ncons", int),
+                        ("relax_nnz", int), ("peak_rss_mib", float)):
+            try:
+                out[k] = cast(float(rec[k]))
+            except (KeyError, ValueError):
+                out[k] = None
+        return out
     except (KeyError, ValueError):
         return None
 
@@ -172,6 +194,30 @@ def gapclosing_block(states, instances, rows, trace_dir):
     return "\n".join(out)
 
 
+def size_block(states, instances, rows, results_dir):
+    """Problem size and memory: variables, constraints, nonzeros, peak RSS."""
+    out, missing = [], 0
+    for state in states:
+        disp = escape(display_name(instances[state][0]))
+        out.append("\\midrule")
+        out.append(f"\\multirow{{{len(rows)}}}{{*}}{{{disp}}}")
+        for algo, label, emph in rows:
+            shown = f"\\emph{{{label}}}" if emph else label
+            r = load_result(results_dir, state, algo)
+            if r is None or r.get("relax_nvars") in (None, 0):
+                out.append(f" & {shown} & N/A & N/A & N/A & N/A \\\\")
+                missing += 1
+                continue
+            rss = "N/A" if r["peak_rss_mib"] is None else f"{r['peak_rss_mib']:.0f}"
+            out.append(f" & {shown} & {r['relax_nvars']} & {r['relax_ncons']} & "
+                       f"{r['relax_nnz']} & {rss} \\\\")
+    out.append("\\bottomrule")
+    if missing:
+        print(f"WARNING: {missing} row(s) have no size diagnostics; those results "
+              f"predate the instrumentation -- re-run with --force", file=sys.stderr)
+    return "\n".join(out)
+
+
 def build(table, args, instances):
     spec = TABLES[table]
     # sorted by display name for determinism; the paper's blocks are in an
@@ -182,6 +228,8 @@ def build(table, args, instances):
         print(f"WARNING: no instances with N = {spec['m']}", file=sys.stderr)
     if spec["kind"] == "gapclosing":
         return gapclosing_block(states, instances, spec["rows"], args.trace_dir)
+    if spec["kind"] == "size":
+        return size_block(states, instances, spec["rows"], args.results_dir)
     return main_block(states, instances, spec["rows"], args.results_dir)
 
 

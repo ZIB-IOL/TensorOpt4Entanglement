@@ -39,6 +39,12 @@ sBB linear-minimisation oracle
   `maxeffortnnodes` node limit for gap-closing iterations
   `minnnodes`       minimum nodes before an early stop is reported
   `max_obbt`        rounds of optimisation-based bound tightening (0 = off)
+  `relaxation`      which convex relaxation the sBB oracle uses:
+                    `:ddps`     the DDPS outer approximation alone -- one PSD,
+                                unit-trace Z per tree node plus partial-trace
+                                consistency with its children
+                    `:ddpsplus` (default) DDPS strengthened with the tensor and
+                                scalar complex McCormick inequalities
   `is_last`         set once the run enters its gap-closing phase
   `tratio`          fraction of `time_limit` reserved for that phase
 
@@ -86,6 +92,7 @@ mutable struct Param
    heur_alternate1_iter::Int
    heur_alternate_maxfail::Int
    max_obbt::Int
+   relaxation::Symbol
    loop::Int
    start_time::Float64
    is_last::Bool
@@ -121,6 +128,7 @@ mutable struct Param
          heur_alternate1_iter::Int = 20,
          heur_alternate_maxfail::Int = 4,
          max_obbt::Int = 0,
+         relaxation::Symbol = :ddpsplus,
          loop::Int = 2,
          start_time::Float64 = time(),
          is_last::Bool = false,
@@ -134,7 +142,7 @@ mutable struct Param
           heur_LADMM1_maxiter, heur_LADMM_maxiter, heur_LADMM_obj_tol,
           heur_LADMM_step_tol, heur_LADMM_gd_tol, heur_LADMM_rho,
           heur_MANOPT_maxiter, heur_MANOPT1_maxiter, heur_alternate_iter,
-          heur_alternate1_iter, heur_alternate_maxfail, max_obbt,
+          heur_alternate1_iter, heur_alternate_maxfail, max_obbt, relaxation,
           loop, start_time, is_last, tratio, lazification, pool_size,
           pointsize_bound, rank_bound)
    end

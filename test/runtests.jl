@@ -7,6 +7,7 @@ using ExactEntanglement
     include("test_sbb.jl")
     include("test_benchmarks.jl")
     include("test_params.jl")
+    include("test_diagnostics.jl")
     # Needs a Mosek licence; skipped automatically when none is configured.
     include("test_integration.jl")
 end

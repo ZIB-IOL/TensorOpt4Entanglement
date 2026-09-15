@@ -52,6 +52,14 @@ function parseCommandline()
             help = "Heuristic MANOPT maximum iterations"
             arg_type = Int
             default = 150
+        "--relaxation"
+            help = "sBB relaxation: ddpsplus (DDPS + McCormick, default) or ddps"
+            arg_type = String
+            default = "ddpsplus"
+        "--seed"
+            help = "RNG seed"
+            arg_type = Int
+            default = 12345
         "--loop"
             help = "LP loops"
             arg_type = Int

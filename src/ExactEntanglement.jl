@@ -74,6 +74,7 @@ include("sbb/Branching.jl")     # branching rule and node selection
 include("sbb/BoundTighten.jl")  # optimisation-based bound tightening
 include("sbb/Heuristics.jl")    # primal heuristics
 include("sbb/Search.jl")        # the oracle itself: separate! / threshold!
+include("Diagnostics.jl")       # relaxation size and peak memory
 
 # ---- cutting-plane master -----------------------------------------------
 include("cuttingplane/Detector.jl")           # abstract detector + state pool
