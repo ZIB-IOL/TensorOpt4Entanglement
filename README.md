@@ -102,6 +102,7 @@ directory, so every raw file is attributable to the run that produced it.
 ```bash
 export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic
 
+bash runjobs.sh --size 3               # probe: the m=3 jobs only (27 jobs)
 bash runjobs.sh                        # submit all experiments to Slurm
 bash runjobs.sh main                   # just one
 bash runjobs.sh --local                # run here instead, sequentially
@@ -119,6 +120,31 @@ and Slurm alike — so an interrupted or partially failed run is resumed simply
 by running the same command again; only the missing jobs are queued. `--force`
 ignores existing results and redoes everything. When nothing is left to do,
 nothing is submitted.
+
+### Probing with the small instances first
+
+The m=3 instances carry the paper's 1-hour limit, so they exercise the whole
+pipeline — every algorithm, the trajectories, the diagnostics, the tables — at
+a fraction of the cost. Run them before committing to the rest:
+
+```bash
+bash runjobs.sh --size 3              # 27 jobs, ~27 CPU-h worst case
+bash runjobs.sh --size 3 --check      # what those 27 would complete
+python3 scripts/make_tables.py --table m3
+```
+
+That fills `m3`, `ddps3`, `mem3` and `size3` completely. `--size` takes several
+counts (`--size "3 4"`), and `exp_lowrank.sh` reports that it has nothing to do
+unless 5 is among them, since the rank sweep is defined only at m=5.
+
+Once it looks right:
+
+```bash
+bash runjobs.sh                        # the remaining 96 jobs; m=3 is skipped
+```
+
+Nothing is re-run: jobs with a result file are skipped, so the full submission
+picks up exactly where the probe left off.
 
 ### Running one part
 

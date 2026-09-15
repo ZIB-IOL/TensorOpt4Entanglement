@@ -65,6 +65,7 @@ Usage: $(basename "$0") [options]
   -s, --state FILE       run only this benchmark instance (repeatable)
   -a, --algo CODE        run only this algorithm (repeatable; the paper's
                          names, or the pre-rename shorthand)
+  -m, --size "3 4"       run only these subsystem counts (default 3 4 5)
       --slurm            write a job list for run.slurm instead of running
       --results-dir DIR  where result files go        (default results/<part>/)
       --trace-dir DIR    where trajectory CSVs go     (default <results>/traces/)
@@ -85,6 +86,7 @@ parse_args() {
             -t|--time-limit)  TIME_LIMIT="$2"; shift 2 ;;
             -s|--state)       ONLY_STATES+=("$2"); shift 2 ;;
             -a|--algo)        ONLY_ALGOS+=("$2"); shift 2 ;;
+            -m|--size)        M="$2"; shift 2 ;;
             --slurm)          USE_SLURM=1; shift ;;
             --results-dir)    RESULTS_DIR="$2"; shift 2 ;;
             --trace-dir)      TRACE_DIR="$2"; shift 2 ;;

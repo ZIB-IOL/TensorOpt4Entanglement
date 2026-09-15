@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
         -*) FLAGS+=("$1")
-            case "$1" in -t|--time-limit|-s|--state|-a|--algo|--results-dir|--trace-dir|--log-dir|--julia)
+            case "$1" in -t|--time-limit|-s|--state|-a|--algo|-m|--size|--results-dir|--trace-dir|--log-dir|--julia)
                 FLAGS+=("$2"); shift ;; esac
             shift ;;
         *)  PARTS+=("$1"); shift ;;

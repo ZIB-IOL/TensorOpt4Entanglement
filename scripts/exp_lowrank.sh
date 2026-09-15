@@ -13,6 +13,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 parse_args "$@"
 set_part lowrank
 
+# the rank sweep is defined only at m = 5
+M="${M:-5}"
+if [[ " $M " != *" 5 "* ]]; then
+    echo "lowrank: nothing to do (the rank sweep is m = 5 only, asked for m = $M)"
+    exit 0
+fi
 run_table "lowrank_m5" 5 LADMM_400 LADMM_500 LADMM_600 LADMM_700 LADMM_800 LADMM_900 || exit 1
 echo
 echo "analysis:  python3 scripts/make_tables.py --table m5low"
