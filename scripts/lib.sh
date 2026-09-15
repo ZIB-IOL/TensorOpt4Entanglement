@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Shared helpers for the per-table reproduction scripts.
+#
+# Every table script sources this file, then calls `run_table` with the
+# subsystem count, the algorithm list and a table name.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BENCHMARK_DIR="${BENCHMARK_DIR:-$REPO_ROOT/benchmark}"
+RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results}"
+TRACE_DIR="${TRACE_DIR:-$REPO_ROOT/results/traces}"
+LOG_DIR="${LOG_DIR:-$REPO_ROOT/results/logs}"
+
+# -t -1 lets the code pick the paper's per-size limit (1/2/3 h for m=3/4/5).
+TIME_LIMIT="${TIME_LIMIT:--1}"
+
+DRY_RUN="${DRY_RUN:-0}"     # 1 = print the jobs, run nothing
+FORCE="${FORCE:-0}"         # 1 = re-run even if a result file exists
+USE_SLURM="${USE_SLURM:-0}" # 1 = emit a job list for run.slurm instead of running
+
+# --- julia ----------------------------------------------------------------
+pick_julia() {
+    if [[ -n "${JULIA_BIN:-}" ]]; then echo "$JULIA_BIN"; return; fi
+    # the project pins Julia 1.11.x; prefer it when juliaup can provide it
+    if command -v juliaup >/dev/null 2>&1 && juliaup status 2>/dev/null | grep -q "1.11.6"; then
+        echo "julia +1.11.6"; return
+    fi
+    echo "julia"
+}
+JULIA="$(pick_julia)"
+
+check_env() {
+    if ! command -v ${JULIA%% *} >/dev/null 2>&1; then
+        echo "ERROR: julia not found on PATH (set JULIA_BIN)." >&2; exit 1
+    fi
+    local v; v="$($JULIA --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    case "$v" in
+        1.11.*) ;;
+        *) echo "WARNING: using Julia $v; this project is pinned to 1.11.x (README)." >&2 ;;
+    esac
+    if [[ -z "${MOSEKLM_LICENSE_FILE:-}" && ! -f "$HOME/mosek/mosek.lic" ]]; then
+        echo "ERROR: no Mosek licence found." >&2
+        echo "       set MOSEKLM_LICENSE_FILE=/path/to/mosek.lic, or place it at ~/mosek/mosek.lic" >&2
+        exit 1
+    fi
+    mkdir -p "$RESULTS_DIR" "$TRACE_DIR" "$LOG_DIR"
+}
+
+# --- instance selection ---------------------------------------------------
+# Instances are chosen by their declared subsystem count, not by filename, so
+# adding a benchmark automatically joins the right table.
+instances_with_m() {
+    local m="$1" f
+    for f in "$BENCHMARK_DIR"/*.jl; do
+        [[ -f "$f" ]] || continue
+        if grep -qE "^N[[:space:]]*=[[:space:]]*$m[[:space:]]*$" "$f"; then
+            basename "$f"
+        fi
+    done | sort
+}
+
+state_name() { grep -m1 '^name' "$BENCHMARK_DIR/$1" | sed 's/.*=[[:space:]]*//; s/"//g'; }
+
+# --- one job --------------------------------------------------------------
+run_job() {
+    local state="$1" algo="$2"
+    local out="$RESULTS_DIR/${state}_${algo}"
+    if [[ -f "$out" && "$FORCE" != "1" ]]; then
+        echo "  skip   $state $algo (result exists; FORCE=1 to redo)"
+        return 0
+    fi
+    if [[ "$DRY_RUN" == "1" ]]; then
+        echo "  would run: $JULIA --project=. scripts/run_experiment.jl -s $state -a $algo -t $TIME_LIMIT"
+        return 0
+    fi
+    local trace="$TRACE_DIR/${state}_${algo}.csv"
+    rm -f "$trace"
+    echo "  run    $state $algo"
+    local start; start=$(date +%s)
+    ( cd "$REPO_ROOT" && EXACTENT_TRACE="$trace" EXACTENT_RESULTS_DIR="$RESULTS_DIR" \
+        $JULIA --project=. scripts/run_experiment.jl -s "$state" -a "$algo" -t "$TIME_LIMIT" \
+        > "$LOG_DIR/${state}_${algo}.log" 2>&1 )
+    local rc=$? dur=$(( $(date +%s) - start ))
+    if [[ $rc -ne 0 ]]; then
+        echo "  FAIL   $state $algo (exit $rc, ${dur}s) -- see $LOG_DIR/${state}_${algo}.log" >&2
+        return 1
+    fi
+    echo "  ok     $state $algo (${dur}s)"
+}
+
+# --- one table ------------------------------------------------------------
+# run_table <table-name> <m> <algo...>
+run_table() {
+    local table="$1" m="$2"; shift 2
+    local algos=("$@")
+    check_env
+    local states; mapfile -t states < <(instances_with_m "$m")
+    if [[ ${#states[@]} -eq 0 ]]; then
+        echo "ERROR: no benchmark instances with N = $m in $BENCHMARK_DIR" >&2; exit 1
+    fi
+
+    echo "=============================================================="
+    echo " Table: $table   (m = $m)"
+    echo " states:     ${#states[@]}  -> $(for s in "${states[@]}"; do printf '%s ' "$(state_name "$s")"; done)"
+    echo " algorithms: ${algos[*]}"
+    echo " time limit: $TIME_LIMIT  (-1 = paper default for this m)"
+    echo " results:    $RESULTS_DIR"
+    echo "=============================================================="
+
+    if [[ "$USE_SLURM" == "1" ]]; then
+        local joblist="$REPO_ROOT/job_list_${table}.txt"; : > "$joblist"
+        for s in "${states[@]}"; do for a in "${algos[@]}"; do
+            echo "$JULIA $s $a $TIME_LIMIT" >> "$joblist"
+        done; done
+        echo "wrote $joblist ($(wc -l < "$joblist") jobs); submit with: sbatch --array=1-$(wc -l < "$joblist") run.slurm"
+        return 0
+    fi
+
+    local failed=0
+    for s in "${states[@]}"; do
+        for a in "${algos[@]}"; do
+            run_job "$s" "$a" || failed=$((failed+1))
+        done
+    done
+    echo "--------------------------------------------------------------"
+    if [[ $failed -gt 0 ]]; then
+        echo "Table $table: $failed job(s) FAILED"; return 1
+    fi
+    echo "Table $table: all jobs complete"
+}
