@@ -6,13 +6,30 @@ Short instructions to install the Julia packages this project uses and to reprod
 - Linux machine with Julia 1.11.x (tested with 1.11.6) and Mosek.
 - A working Slurm cluster.
 
-> **Julia version matters.** Use 1.11.x. On Julia 1.12+ the benchmark loader is
-> fine, but the pinned `Manifest.toml` resolves differently; if you use
-> [juliaup](https://github.com/JuliaLang/juliaup):
+> **Julia version matters.** Use 1.11.x. The benchmark loader is fine on 1.12+,
+> but `Manifest.toml` is resolved for `julia_version = "1.11.4"`; instantiating
+> it under 1.12 re-resolves the whole graph, so you no longer get the package
+> versions the paper's numbers were produced with.
+>
+> Check what you have with `julia --version`. If it is not 1.11.x, get one —
+> with [juliaup](https://github.com/JuliaLang/juliaup) if you have it:
 > ```bash
 > juliaup add 1.11.6
 > julia +1.11.6 --project=. -e 'using Pkg; Pkg.instantiate()'
 > ```
+> The `+1.11.6` selector is a **juliaup** feature. A plain `julia` binary — what
+> a cluster module usually gives you — treats it as a filename and fails with
+> `SystemError: opening file ".../+1.11.6"`. Without juliaup, unpack an official
+> tarball anywhere you can write (no root needed) and point `JULIA_BIN` at it:
+> ```bash
+> curl -fLO https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.6-linux-x86_64.tar.gz
+> tar xzf julia-1.11.6-linux-x86_64.tar.gz
+> export JULIA_BIN="$PWD/julia-1.11.6/bin/julia"
+> "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.instantiate()'
+> ```
+> `JULIA_BIN` is the setting every script uses, so exporting it (or editing it
+> in the Site settings block of `runjobs.sh`) is all that is needed —
+> `bash runjobs.sh --env` confirms which Julia the jobs will get.
 
 > **Optional: a project-local Julia depot.** Create `.julia_depot/` in the repo
 > and `runjobs.sh` will use it instead of `~/.julia`:
@@ -48,7 +65,7 @@ Short instructions to install the Julia packages this project uses and to reprod
 > ```
 > Check it works with:
 > ```bash
-> julia +1.11.6 --project=. -e 'using JuMP, MosekTools; m=Model(Mosek.Optimizer); set_silent(m); @variable(m,x>=1.5); @objective(m,Min,x); optimize!(m); println(termination_status(m))'
+> julia --project=. -e 'using JuMP, MosekTools; m=Model(Mosek.Optimizer); set_silent(m); @variable(m,x>=1.5); @objective(m,Min,x); optimize!(m); println(termination_status(m))'
 > ```
 - Project directory layout:
     - `src/` — the `ExactEntanglement` package
@@ -77,9 +94,9 @@ Naming: `lowerCamelCase` for functions, `UpperCamelCase` for types. The
 interface methods whose names are fixed by ManifoldsBase/Manopt.
 
 ## Install required Julia packages
-From the project root (this repo), prefer using the project environment if present:
+From the project root (this repo), using a 1.11.x Julia (see above):
 ```bash
-julia +1.11.6 --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 This will install packages listed in `Project.toml`/`Manifest.toml` if they exist.
 

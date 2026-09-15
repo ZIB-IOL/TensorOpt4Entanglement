@@ -32,7 +32,21 @@ else
     case "$v" in
         1.11.*) pass "julia $v" ;;
         "")     fail "could not determine the julia version" ;;
-        *)      note "julia $v; the project is pinned to 1.11.x (README). 1.12+ changes package resolution" ;;
+        *)      note "julia $v; Manifest.toml is resolved for 1.11.x, and instantiating"
+                printf "        under %s re-resolves it to different package versions\n" "$v"
+                if command -v juliaup >/dev/null 2>&1; then
+                    printf "        fix: juliaup add 1.11.6 && export JULIA_BIN='julia +1.11.6'\n"
+                else
+                    printf "        fix: unpack an official 1.11.6 tarball and set JULIA_BIN to it\n"
+                    printf "        (no juliaup here, so the 'julia +1.11.6' selector will NOT work)\n"
+                fi ;;
+    esac
+    # a "+version" selector only works through juliaup's shim; a plain binary
+    # takes it as a filename, which is a confusing way to find out
+    case "$JULIA_BIN" in
+        *\ +*) command -v juliaup >/dev/null 2>&1 \
+                   || fail "JULIA_BIN uses a '+version' selector but juliaup is not installed;
+        a plain julia binary reads it as a filename (SystemError: opening file \"+...\")" ;;
     esac
 fi
 
