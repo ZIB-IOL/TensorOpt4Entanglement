@@ -26,7 +26,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # One stamp for this invocation: every job list it writes carries it, so a
 # resubmission cannot disturb the lists a pending array is still reading.
-export JOBLIST_STAMP="$(date +%Y%m%d-%H%M%S)"
+export JOBLIST_STAMP="$(date +%Y%m%d-%H%M%S)-$$"
 
 # the available parts are whatever experiment scripts exist -- no second list
 ALL=()
@@ -57,8 +57,9 @@ done
 [[ ${#PARTS[@]} -eq 0 ]] && PARTS=("${ALL[@]}")
 
 if [[ "$MODE" == "check" ]]; then
-    # generate the lists without submitting, then audit table coverage
-    rm -f job_list_*.txt
+    # Generate this invocation's lists, then audit coverage against *only*
+    # those: joblists/ accumulates one set per submission, so globbing all of
+    # them would count stale jobs as dispatched.
     for part in "${PARTS[@]}"; do
         # stderr is kept: if an experiment cannot even build its list (no Mosek
         # licence, a bad --algo) the coverage report would otherwise blame the
@@ -68,7 +69,7 @@ if [[ "$MODE" == "check" ]]; then
             exit 1
         fi
     done
-    python3 scripts/check_coverage.py
+    python3 scripts/check_coverage.py --job-lists "joblists/*-${JOBLIST_STAMP}.txt"
     exit $?
 fi
 

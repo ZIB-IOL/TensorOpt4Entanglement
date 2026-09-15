@@ -18,7 +18,7 @@ BENCHMARK_DIR="${BENCHMARK_DIR:-$REPO_ROOT/benchmark}"
 # results/ itself still holds the flat files published with the paper.
 # `set_part <name>` is called by each experiment script before running.
 PART="${PART:-}"
-JOBLIST_STAMP="${JOBLIST_STAMP:-$(date +%Y%m%d-%H%M%S)}"
+JOBLIST_STAMP="${JOBLIST_STAMP:-$(date +%Y%m%d-%H%M%S)-$$}"
 declare -A _JOBLIST_STARTED
 # optional narrowing, set by --state / --algo
 ONLY_STATES=()
@@ -62,10 +62,13 @@ Usage: $(basename "$0") [options]
   -f, --force            re-run every job, even if a result file exists
   -n, --dry-run          list the jobs that would run, run nothing
   -t, --time-limit SEC   per-job time limit (-1 = the paper's limit for this m)
+  -s, --state FILE       run only this benchmark instance (repeatable)
+  -a, --algo CODE        run only this algorithm (repeatable; the paper's
+                         names, or the pre-rename shorthand)
       --slurm            write a job list for run.slurm instead of running
-      --results-dir DIR  where result files go        (default results/)
-      --trace-dir DIR    where trajectory CSVs go     (default results/traces/)
-      --log-dir DIR      where per-job logs go        (default results/logs/)
+      --results-dir DIR  where result files go        (default results/<part>/)
+      --trace-dir DIR    where trajectory CSVs go     (default <results>/traces/)
+      --log-dir DIR      where per-job logs go        (default <results>/logs/)
       --julia CMD        julia command to use         (default: julia +1.11.6)
   -h, --help             this message
 

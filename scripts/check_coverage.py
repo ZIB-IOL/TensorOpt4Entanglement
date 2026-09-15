@@ -14,7 +14,7 @@ import argparse, glob, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tables
-from tables.common import ROOT, RESULT_DIRS, Context, load_instances
+from tables.common import ROOT, RESULT_DIRS, LEGACY_CODE, Context, load_instances
 
 
 def main():
@@ -45,8 +45,13 @@ def main():
         _, spec = tables.REGISTRY[name]
         cells = [(s, a) for s in ctx.states(spec["m"]) for a, _, _ in spec["rows"]]
         disp = [c for c in cells if c in dispatched]
-        disk = [c for c in cells if c not in dispatched and
-                any(os.path.isfile(os.path.join(d, f"{c[0]}_{c[1]}")) for d in ctx.result_dirs)]
+        # a result may sit under the canonical name or, if it predates the
+        # rename, under the legacy code -- the same rule the readers use
+        def on_disk(state, algo):
+            names = [algo] + ([LEGACY_CODE[algo]] if algo in LEGACY_CODE else [])
+            return any(os.path.isfile(os.path.join(d, f"{state}_{n}"))
+                       for d in ctx.result_dirs for n in names)
+        disk = [c for c in cells if c not in dispatched and on_disk(*c)]
         miss = [c for c in cells if c not in dispatched and c not in disk]
         missing_total += len(miss)
         gap = ", ".join(sorted({a for _, a in miss}))
