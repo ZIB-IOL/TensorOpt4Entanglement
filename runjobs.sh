@@ -84,12 +84,14 @@ while [[ $# -gt 0 ]]; do
         --check)      MODE=check; shift ;;
         --env)        MODE=env; shift ;;
         --skip-env-check) SKIP_ENV_CHECK=1; shift ;;
+        --skip-precompile-warmup) SKIP_PRECOMPILE_WARMUP=1; shift ;;
         --dry-run|-n) MODE=dry; shift ;;
         -h|--help)
             echo "Usage: $(basename "$0") [parts...] [--local|--dry-run|--check|--env] [options]"
             echo "  parts: ${ALL[*]}   (default: all)"
             echo "      --env              check this machine can run the jobs"
             echo "      --skip-env-check   submit without that check"
+            echo "      --skip-precompile-warmup  do not pre-warm the cache on a compute node"
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
         -*) FLAGS+=("$1")
@@ -131,6 +133,22 @@ if [[ "$MODE" == "slurm" || "$MODE" == "local" ]]; then
     # unquoted on purpose: JULIA_BIN may carry a juliaup selector ("julia +1.11.6")
     # and must word-split into command plus argument
     $JULIA_BIN --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
+fi
+
+# A precompile cache built on the login node is rejected by a compute node with
+# a different CPU, so every job in the array recompiles the depot at once and
+# they block on each other's pidfiles ("Being precompiled by another machine")
+# instead of solving. Warm the cache once, on a node of the partition the jobs
+# will actually run on, before anything is queued.
+if [[ "$MODE" == "slurm" && "${SKIP_PRECOMPILE_WARMUP:-0}" != "1" ]] && command -v srun >/dev/null 2>&1; then
+    part=$(grep -oP '^#SBATCH --partition=\K\S+' run.slurm || true)
+    echo "warming the precompile cache on a '$part' node (once, so the array does not)..."
+    if ! srun ${part:+-p "$part"} --ntasks=1 --cpus-per-task=1 --mem=10G --time=00:40:00 \
+              $JULIA_BIN --project=. -e 'using ExactEntanglement, JuMP, MosekTools'; then
+        echo "WARNING: could not warm the cache on a compute node; the jobs will each" >&2
+        echo "         precompile on first load, which is slow but not fatal." >&2
+        echo "         --skip-precompile-warmup silences this step." >&2
+    fi
 fi
 
 # Queueing a hundred jobs into an environment that cannot solve wastes a whole

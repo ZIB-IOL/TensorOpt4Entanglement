@@ -31,7 +31,12 @@ actually have" without running anything.
 
 A Slurm submission runs this check itself and refuses to queue anything if it
 fails (`--skip-env-check` overrides), so a broken environment costs one message
-rather than a hundred failed jobs.
+rather than a hundred failed jobs. It then warms the precompile cache on one
+node of the target partition: a cache built on the login node is rejected by a
+compute node with a different CPU, and without this every job in the array
+recompiles the depot at once and blocks on the others
+(`Being precompiled by another machine`). The jobs themselves run with
+`--compiled-modules=existing`, so they read caches but never write them.
 
 Notes:
 - On 1.12+ the Manifest re-resolves to different package versions, so stay on 1.11.x.

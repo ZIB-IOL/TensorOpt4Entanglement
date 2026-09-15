@@ -60,8 +60,13 @@ else
     mkdir -p outputs
 fi
 
+# --compiled-modules=existing: use the caches runjobs.sh warmed, but never write
+# new ones. Without it every job in an array recompiles the shared depot at the
+# same time and they serialise on each other's pidfiles rather than solving.
+# A cache that is missing or stale is then compiled in memory: slower for that
+# job, but no contention and no half-written cache files.
 echo "$juliabin --project=. scripts/run_experiment.jl -s $instance -a $algorithm -t $timelimit"
 # unquoted: JULIA_BIN may be a juliaup selector ("julia +1.11.6"), which has to split
-srun $juliabin --project=. scripts/run_experiment.jl \
+srun $juliabin --compiled-modules=existing --project=. scripts/run_experiment.jl \
      -s "$instance" -a "$algorithm" -t "$timelimit" \
      > "$logfile" 2>&1
