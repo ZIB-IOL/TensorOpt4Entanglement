@@ -34,12 +34,12 @@ else
 
             @testset "DDPS+ gives a valid lower bound" begin
                 @test runEntangle(args("DDPS+")) == 0
-                @test 0 < readbound("state_133.jl_DDPS+", "glblb") < 1
+                @test 0 < readbound("state_133.jl_DDPS+", "lb_relx") < 1
             end
 
             @testset "Alt-SDP gives a valid upper bound" begin
                 @test runEntangle(args("Alt-SDP")) == 0
-                @test 0 < readbound("state_133.jl_Alt-SDP", "glbub") < 1
+                @test 0 < readbound("state_133.jl_Alt-SDP", "ub_relx") < 1
             end
 
             @testset "GHZ bounds respect the analytic threshold" begin
@@ -48,7 +48,7 @@ else
                 @test ghz(3) ≈ 0.8
                 ghzargs = merge(args("DDPS+"), Dict{String,Any}("state" => "state_033.jl"))
                 @test runEntangle(ghzargs) == 0
-                lb = readbound("state_033.jl_DDPS+", "glblb")
+                lb = readbound("state_033.jl_DDPS+", "lb_relx")
                 # DDPS+ is a relaxation, so its lower bound cannot exceed the truth
                 @test lb <= ghz(3) + 1e-6
                 @test lb > 0.5                      # and it is not vacuous
@@ -75,8 +75,8 @@ else
 
             @testset "the bounds bracket each other" begin
                 # DDPS+ lower bound must not exceed the Alt-SDP upper bound
-                @test readbound("state_133.jl_DDPS+", "glblb") <=
-                      readbound("state_133.jl_Alt-SDP", "glbub") + 1e-6
+                @test readbound("state_133.jl_DDPS+", "lb_relx") <=
+                      readbound("state_133.jl_Alt-SDP", "ub_relx") + 1e-6
             end
         finally
             delete!(ENV, "EXACTENT_RESULTS_DIR")

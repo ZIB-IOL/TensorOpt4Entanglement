@@ -80,10 +80,19 @@ def load_result(results_dirs, state, algo):
         if ":" in line:
             k, v = line.split(":", 1)
             rec[k.strip()] = v.strip()
+    # Field names are the paper's symbols; runs published before the rename
+    # used the older names, so accept either.
+    def field(*names):
+        for n in names:
+            if n in rec:
+                return float(rec[n])
+        raise KeyError(names[0])
     try:
-        out = dict(glbub=float(rec["glbub"]), glblb=float(rec["glblb"]),
-                   approxub=float(rec["approxub"]), approxfeas=float(rec["approxfeas"]),
-                   time=float(rec["time"]))
+        out = dict(glbub=field("ub_relx", "glbub"),
+                   glblb=field("lb_relx", "glblb"),
+                   approxub=field("ub_heur", "approxub"),
+                   approxfeas=field("feas_heur", "approxfeas"),
+                   time=field("time"))
     except (KeyError, ValueError):
         return None
     # diagnostics are absent from results produced before they were added

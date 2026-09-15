@@ -1,12 +1,12 @@
 """
-    AlternateModel
+    AltSDPModel
 
 One restricted SDP of the alternating method: `Xvars` are the free subsystem
 density matrices (one per rank-one component), `ysvars` their lifted tensors,
 `z` the interpolation variable, and `constensor` the coupling constraints whose
 duals drive the pricing step.
 """
-struct AlternateModel
+struct AltSDPModel
     model::Model
     Xvars
     ysvars
@@ -105,7 +105,7 @@ function restrict(Min, Mdir, Xvals, nsubs, dims, nrank1, freesyss)
 
     @objective(model, Max, z)
 
-    alternatemodel = AlternateModel(model, Xvars, ysvars, z, constensor)
+    alternatemodel = AltSDPModel(model, Xvars, ysvars, z, constensor)
     return alternatemodel
 end
 
@@ -162,7 +162,7 @@ function price(Xdual, Xvals, nrank1, nsubs, freesyss)
     return success, freesyss_
 end
 
-function alternateSolve(dims, H, purestates, substates, weights, param, firstrun = false)
+function altSDPSolve(dims, H, purestates, substates, weights, param, firstrun = false)
     dimH = prod(dims)
     nsubs = length(dims)
 

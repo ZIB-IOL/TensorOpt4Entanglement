@@ -114,13 +114,13 @@ end
 # Drivers for the white-noise mixing threshold problem.
 #
 # Paper -> code:
-#   IR       (iterative refinement)        -> detectEntanglementThresholdLiftDiscrete   [-a LD/LD1/LDL/LDR*]
-#   CP       (cutting plane, standalone)   -> detectEntanglementThresholdDiscrete       [-a D]
-#   Alt-SDP  (alternating SDP)             -> detectEntanglementThresholdAlternate      [-a A]
-#   Alt-SDP + CP                           -> detectEntanglementThresholdHybridSingle   [-a AD]
-#   DDPS+    (tensor RLT lower bound)      -> detectEntanglementThresholdRLT            [-a RLT]
-#   DPS      (via Ket.jl)                  -> detectEntanglementThresholdPPT            [-a PPT]
-#   dual ALM (experimental, not in paper)  -> detectEntanglementThresholdLiftDual       [-a LDual]
+#   IR       (iterative refinement)        -> solveIR   [-a LD/LD1/LDL/LDR*]
+#   CP       (cutting plane, standalone)   -> solveCP       [-a D]
+#   Alt-SDP  (alternating SDP)             -> solveAltSDP      [-a A]
+#   Alt-SDP + CP                           -> solveAltSDPCP   [-a AD]
+#   DDPS+    (tensor RLT lower bound)      -> solveDDPSPlus            [-a RLT]
+#   DPS      (via Ket.jl)                  -> solveDPS            [-a PPT]
+#   dual ALM (experimental, not in paper)  -> solveDualALM       [-a LDual]
 #
 # Bounds returned, in paper notation:
 #   glbub     = ub_relx    (upper bound from the convex master relaxation)
@@ -213,12 +213,12 @@ function flipMultipliers!(multipliers)
 end
 
 """
-    detectEntanglementThresholdLiftDiscrete(HR, HI, dims, param)
+    solveIR(HR, HI, dims, param)
 
 Iterative refinement (IR): alternate LADMM on the lifted nonconvex problem with
 the cutting-plane master, each warm-starting the other.
 """
-function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     maxi, singlerun, clearall = refinementBudget(param)
 
     separateproblem = Problem(HR, HI, dims)
@@ -238,7 +238,7 @@ function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix
 
         # LADMM on the lifted problem (paper Alg. LADMM)
         purestates, substates, approxub, approxfeas =
-            ALMADMMSolve(detector, dims, HR + im * HI, substates, weights, 1 - ub, multipliers, param, i == 1, singlerun)
+            ladmmSolve(detector, dims, HR + im * HI, substates, weights, 1 - ub, multipliers, param, i == 1, singlerun)
 
         clearStates(detector, clearall)
         addBatchStates(detector, purestates, substates, param.lazification)
@@ -270,12 +270,12 @@ function detectEntanglementThresholdLiftDiscrete(HR::Matrix{Float64}, HI::Matrix
 end
 
 """
-    detectEntanglementThresholdDiscrete(HR, HI, dims, param)
+    solveCP(HR, HI, dims, param)
 
 Standalone cutting-plane algorithm (CP): no lifted heuristic, one master solve
 refined by the sBB oracle until the bounds meet.
 """
-function detectEntanglementThresholdDiscrete(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveCP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     separateproblem = Problem(HR, HI, dims)
     detector, _, _, _ = initialActiveSet(HR, HI, dims, param)
     ub, lb, _, _, _, _, _, _ = cuttingPlane(detector, separateproblem, param, 1)
@@ -283,25 +283,25 @@ function detectEntanglementThresholdDiscrete(HR::Matrix{Float64}, HI::Matrix{Flo
 end
 
 """
-    detectEntanglementThresholdAlternate(HR, HI, dims, param)
+    solveAltSDP(HR, HI, dims, param)
 
 SDP-based alternating optimisation (Alt-SDP): one subsystem density matrix per
 rank-one component is left free and updated by an SDP. Upper bound only.
 """
-function detectEntanglementThresholdAlternate(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveAltSDP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     detector, _, _, _ = initialActiveSet(HR, HI, dims, param)
     weights = ones(length(detector.substates)) / length(detector.substates)
-    ub, _, _ = alternateSolve(dims, HR + im * HI, detector.purestates, detector.substates, weights, param)
+    ub, _, _ = altSDPSolve(dims, HR + im * HI, detector.purestates, detector.substates, weights, param)
     return ub, -Inf64, ub, 0.0
 end
 
 """
-    detectEntanglementThresholdPPT(HR, HI, dims, param)
+    solveDPS(HR, HI, dims, param)
 
 DPS hierarchy lower bound via `Ket.entanglement_robustness`. The bipartition and
 level follow the paper's DPS configuration per subsystem count.
 """
-function detectEntanglementThresholdPPT(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveDPS(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     ρ = HR + im * HI
     dimH = reduce(*, dims)
     config = Dict([2, 2, 2] => ([4, 2], 6),
@@ -315,21 +315,21 @@ function detectEntanglementThresholdPPT(HR::Matrix{Float64}, HI::Matrix{Float64}
 end
 
 """
-    detectEntanglementThresholdRLT(HR, HI, dims, param)
+    solveDDPSPlus(HR, HI, dims, param)
 
 DDPS+ lower bound: solve the tensor-RLT relaxation once at the sBB root.
 """
-function detectEntanglementThresholdRLT(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveDDPSPlus(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     return threshold!(Problem(HR, HI, dims), param, 2)
 end
 
 """
-    detectEntanglementThresholdHybridSingle(HR, HI, dims, param)
+    solveAltSDPCP(HR, HI, dims, param)
 
 Alt-SDP in place of LADMM inside the refinement loop: the alternating SDP
 supplies the candidate extreme points that the cutting-plane master then prices.
 """
-function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveAltSDPCP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     singlerun, clearall, maxi = false, false, 10000000
 
     separateproblem = Problem(HR, HI, dims)
@@ -346,7 +346,7 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
         weights, substates, purestates =
             selectTopFactors(weights, param.rank_bound, detector.substates, detector.purestates)
 
-        ub, purestates, substates = alternateSolve(dims, HR + im * HI, purestates, substates, weights, param, i == 1)
+        ub, purestates, substates = altSDPSolve(dims, HR + im * HI, purestates, substates, weights, param, i == 1)
         glbub = min(glbub, ub)
 
         clearStates(detector, clearall)
@@ -376,12 +376,12 @@ function detectEntanglementThresholdHybridSingle(HR::Matrix{Float64}, HI::Matrix
 end
 
 """
-    detectEntanglementThresholdLiftDual(HR, HI, dims, param)
+    solveDualALM(HR, HI, dims, param)
 
 Experimental dual augmented-Lagrangian variant (`-a LDual`). Not part of the
 paper; kept for comparison. Runs a single dual ALM solve and reports its bound.
 """
-function detectEntanglementThresholdLiftDual(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+function solveDualALM(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
     _, singlerun, _ = refinementBudget(param)
     multipliers = 1.0
 

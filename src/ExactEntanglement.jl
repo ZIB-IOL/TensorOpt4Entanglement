@@ -91,8 +91,7 @@ include("Drivers.jl")
 
 export Param
 export runEntangle
-export detectEntanglementThresholdLiftDiscrete,
-       detectEntanglementThresholdDiscrete,
-       detectEntanglementThresholdHybridSingle
+export solveIR, solveCP, solveAltSDP, solveDPS, solveDDPSPlus,
+       solveAltSDPCP, solveDualALM
 
 end # module ExactEntanglement

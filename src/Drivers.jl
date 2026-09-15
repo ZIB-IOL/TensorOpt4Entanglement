@@ -133,34 +133,34 @@ const ALGORITHMS = Dict{String,Function}(
         p.heur_alternate_iter = -1
         p.heur_alternate1_iter = -1
         p.heur_alternate_maxfail = 1
-        ub, lb, aub, afeas = detectEntanglementThresholdAlternate(HR, HI, dims, p)
+        ub, lb, aub, afeas = solveAltSDP(HR, HI, dims, p)
         return ub, lb, aub, afeas, 0
     end,
     "LADMM"   => function (HR, HI, dims, p)
         p.loop = -3                       # one IR iteration = LADMM + crossover
-        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
+        solveIR(HR, HI, dims, p)
     end,
     "CP"      => function (HR, HI, dims, p)
         p.maxrounds = -1
-        ub, lb, aub, afeas = detectEntanglementThresholdDiscrete(HR, HI, dims, p)
+        ub, lb, aub, afeas = solveCP(HR, HI, dims, p)
         return ub, lb, aub, afeas, 0
     end,
     "IR"      => function (HR, HI, dims, p)
         p.pool_size = -1
         p.lazification = true
-        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
+        solveIR(HR, HI, dims, p)
     end,
-    "DPS"     => (HR, HI, dims, p) -> (0, detectEntanglementThresholdPPT(HR, HI, dims, p), 0, 0, 0),
-    "DDPS+"   => (HR, HI, dims, p) -> (0, detectEntanglementThresholdRLT(HR, HI, dims, p), 0, 0, 0),
+    "DPS"     => (HR, HI, dims, p) -> (0, solveDPS(HR, HI, dims, p), 0, 0, 0),
+    "DDPS+"   => (HR, HI, dims, p) -> (0, solveDDPSPlus(HR, HI, dims, p), 0, 0, 0),
 
     # --- variants not given a name in the paper ----------------------------
-    "IR-nolazy"  => (HR, HI, dims, p) -> detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p),
+    "IR-nolazy"  => (HR, HI, dims, p) -> solveIR(HR, HI, dims, p),
     "IR-clear"   => function (HR, HI, dims, p)
         p.loop = -2                       # one IR iteration, active set cleared
-        detectEntanglementThresholdLiftDiscrete(HR, HI, dims, p)
+        solveIR(HR, HI, dims, p)
     end,
-    "Alt-SDP+CP" => (HR, HI, dims, p) -> detectEntanglementThresholdHybridSingle(HR, HI, dims, p),
-    "DualALM"    => (HR, HI, dims, p) -> detectEntanglementThresholdLiftDual(HR, HI, dims, p),
+    "Alt-SDP+CP" => (HR, HI, dims, p) -> solveAltSDPCP(HR, HI, dims, p),
+    "DualALM"    => (HR, HI, dims, p) -> solveDualALM(HR, HI, dims, p),
 )
 
 """
@@ -183,6 +183,16 @@ const LEGACY_ALIASES = Dict(
 Canonical name for `code`, accepting the legacy shorthand.
 """
 resolveAlgorithm(code::AbstractString) = get(LEGACY_ALIASES, code, String(code))
+
+"""
+Result-file field names used before they were aligned with the paper's symbols.
+Readers accept both, so the runs published with the paper still load.
+"""
+const LEGACY_FIELDS = Dict(
+    "ub_relx" => "glbub", "lb_relx" => "glblb",
+    "ub_heur" => "approxub", "feas_heur" => "approxfeas",
+    "weights_sum" => "approxweights",
+)
 
 """
     withRelaxation(code, mode)
@@ -279,11 +289,13 @@ function runEntangle(args)
     open(result_file, "w") do io
         println(io, "instance: $(args["state"])")
         println(io, "algo: $algo")
-        println(io, "glbub: $glbub")
-        println(io, "approxub: $approxub")
-        println(io, "approxfeas: $approxfeas")
-        println(io, "glblb: $glblb")
-        println(io, "approxweights: $approxweights")
+        # field names are the paper's symbols; see LEGACY_FIELDS for the
+        # names used by the runs published with the paper
+        println(io, "ub_relx: $glbub")
+        println(io, "ub_heur: $approxub")
+        println(io, "feas_heur: $approxfeas")
+        println(io, "lb_relx: $glblb")
+        println(io, "weights_sum: $approxweights")
         println(io, "time: $elapsed_time")
         # provenance: what was run, and with which settings
         println(io, "relaxation: $(param.relaxation)")

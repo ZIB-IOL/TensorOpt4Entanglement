@@ -339,12 +339,16 @@ New runs are written under the canonical name, so `-a RLT` produces
 Result files carry the bounds plus provenance and diagnostics:
 
 ```
-glbub / glblb / approxub / approxfeas / time      the reported values
+ub_relx / lb_relx / ub_heur / feas_heur / time     the reported values
 relaxation / seed / julia / host                   provenance
 relax_nvars / relax_ncons / relax_nnz              root relaxation size
 relax_cbf_bytes                                    its size on disk (CBF)
 mem_total_* / mem_cp_* / mem_lmo_* / mem_ladmm_*   memory per level
 ```
+
+Field names are the paper's symbols. Runs published before the rename used
+`glbub` / `glblb` / `approxub` / `approxfeas` / `approxweights`; readers accept
+either, so the published data still loads.
 
 The relaxation is measured **without solving it**, so those figures are
 deterministic and machine-independent; only the memory fields depend on the

@@ -169,7 +169,7 @@ function makeObjectiveClosures(M::LiftModel, dirs, Min, multipliers, zeta, z, in
 end
 
 """
-    ALMADMMSolve(detector, dims, H, substates, weights, z, multipliers, param,
+    ladmmSolve(detector, dims, H, substates, weights, z, multipliers, param,
                  is_escaping = false, is_high_accuracy = false)
 
 LADMM: lifted alternating direction method of multipliers (paper Alg. LADMM).
@@ -185,7 +185,7 @@ Returns `(purestates, substates, 1 - z, residual, weights)`. The third value is
 the heuristic upper bound `ub_heur`; it is only a valid bound on the original
 problem when `residual` is zero to tolerance.
 """
-ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers,
+ladmmSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers,
              param::Param, is_escaping = false, is_high_accuracy = false) =
     withPhase(:ladmm) do
         ALMADMMSolve_(detector, dims, H, substates, weights, z, multipliers,
