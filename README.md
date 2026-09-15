@@ -162,8 +162,13 @@ bash runjobs.sh --help                 # all options
 bash scripts/exp_main.sh               # or run one experiment directly
 ```
 
-Finished jobs are skipped, so an interrupted run resumes. `M="3"` restricts an
-experiment to one subsystem count.
+**A job whose result file already exists is skipped** — in every mode, local
+and Slurm alike — so an interrupted or partially failed run is resumed simply
+by running the same command again; only the missing jobs are queued. `--force`
+ignores existing results and redoes everything. When nothing is left to do,
+nothing is submitted.
+
+`M="3"` restricts an experiment to one subsystem count.
 
 ### One entry point, two destinations
 

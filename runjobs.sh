@@ -8,14 +8,19 @@
 #   bash runjobs.sh                    submit all experiments to Slurm
 #   bash runjobs.sh main               just one experiment
 #   bash runjobs.sh --local            run here instead, sequentially
+#   bash runjobs.sh --force            redo everything, ignoring existing results
 #   bash runjobs.sh --dry-run          show what would happen, do nothing
 #   bash runjobs.sh --local main -t 60 forward options to the experiments
 #
 # Cluster path:
 #   runjobs.sh -> scripts/exp_*.sh --slurm -> job_list_<part>.txt -> run.slurm
 #
-# Each part writes to results/<part>/, so the three never collide. Finished
-# jobs are skipped, so an interrupted run can simply be restarted.
+# Each part writes to results/<part>/, so the three never collide.
+#
+# By default a job whose result file already exists is skipped, in every mode,
+# so re-running this script queues only what is still missing -- that is how an
+# interrupted or partially failed run is resumed. --force ignores existing
+# results and redoes everything.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -51,7 +56,7 @@ if [[ "$MODE" == "check" ]]; then
     # generate the lists without submitting, then audit table coverage
     rm -f job_list_*.txt
     for part in "${PARTS[@]}"; do
-        USE_SLURM=1 FORCE=1 bash "scripts/exp_${part}.sh" >/dev/null 2>&1
+        USE_SLURM=1 bash "scripts/exp_${part}.sh" "${FLAGS[@]+"${FLAGS[@]}"}" >/dev/null 2>&1
     done
     python3 scripts/check_coverage.py
     exit $?
@@ -75,7 +80,7 @@ for part in "${PARTS[@]}"; do
     case "$MODE" in
         local) bash "$script" "${FLAGS[@]+"${FLAGS[@]}"}" || failed+=("$part") ;;
         dry)   bash "$script" --dry-run "${FLAGS[@]+"${FLAGS[@]}"}" || failed+=("$part") ;;
-        slurm) USE_SLURM=1 FORCE=1 bash "$script" "${FLAGS[@]+"${FLAGS[@]}"}" || failed+=("$part") ;;
+        slurm) USE_SLURM=1 bash "$script" "${FLAGS[@]+"${FLAGS[@]}"}" || failed+=("$part") ;;
     esac
 done
 
@@ -84,11 +89,21 @@ if [[ "$MODE" == "slurm" ]]; then
     total=0
     for list in job_list_*.txt; do
         [[ -f "$list" ]] || continue
-        n=$(wc -l < "$list"); total=$((total + n))
+        n=$(wc -l < "$list")
+        if [[ $n -eq 0 ]]; then
+            echo "nothing to submit for ${list#job_list_}: all results already present"
+            rm -f "$list"
+            continue
+        fi
+        total=$((total + n))
         echo "submitting $list ($n jobs)"
         JOB_LIST="$list" sbatch --array=1-"$n" run.slurm || failed+=("$list")
     done
-    echo "total jobs submitted: $total"
+    if [[ $total -eq 0 ]]; then
+        echo "nothing submitted: every experiment already has results (use --force to redo)"
+    else
+        echo "total jobs submitted: $total"
+    fi
 fi
 
 echo

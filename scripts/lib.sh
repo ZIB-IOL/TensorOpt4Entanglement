@@ -176,13 +176,28 @@ run_table() {
             : > "$joblist"
             _JOBLIST_STARTED[$joblist]=1
         fi
+        # A job whose result file already exists is left out of the list, so a
+        # resubmission only runs what is still missing. --force includes
+        # everything regardless.
+        local added=0 skipped=0
         for s in "${states[@]}"; do for a in "${algos[@]}"; do
+            if [[ -f "$RESULTS_DIR/${s}_${a}" && "$FORCE" != "1" ]]; then
+                skipped=$((skipped+1))
+                continue
+            fi
             echo "$s $a $TIME_LIMIT $RESULTS_DIR" >> "$joblist"
+            added=$((added+1))
         done; done
         local n; n=$(wc -l < "$joblist")
-        echo "wrote $joblist ($n jobs)"
-        echo "submit with:"
-        echo "  JOB_LIST=$(basename "$joblist") sbatch --array=1-$n run.slurm"
+        if [[ "$FORCE" == "1" ]]; then
+            echo "queued $added job(s) [--force: existing results ignored]; $joblist now has $n"
+        else
+            echo "queued $added job(s), skipped $skipped already done; $joblist now has $n"
+        fi
+        if [[ $n -gt 0 ]]; then
+            echo "submit with:"
+            echo "  JOB_LIST=$(basename "$joblist") sbatch --array=1-$n run.slurm"
+        fi
         return 0
     fi
 
