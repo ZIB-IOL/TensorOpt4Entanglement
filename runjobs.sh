@@ -143,8 +143,13 @@ fi
 if [[ "$MODE" == "slurm" && "${SKIP_PRECOMPILE_WARMUP:-0}" != "1" ]] && command -v srun >/dev/null 2>&1; then
     part=$(grep -oP '^#SBATCH --partition=\K\S+' run.slurm || true)
     echo "warming the precompile cache on a '$part' node (once, so the array does not)..."
+    # Pkg.precompile covers the dependency graph; the `using` additionally
+    # triggers the weak-dependency extensions, which only compile once the
+    # packages that activate them are actually loaded. The job logs showed
+    # mostly those (…Ext), so the load matters as much as the precompile.
     if ! srun ${part:+-p "$part"} --ntasks=1 --cpus-per-task=1 --mem=10G --time=00:40:00 \
-              $JULIA_BIN --project=. -e 'using ExactEntanglement, JuMP, MosekTools'; then
+              $JULIA_BIN --project=. -e 'using Pkg; Pkg.precompile();
+                                         using ExactEntanglement, JuMP, MosekTools'; then
         echo "WARNING: could not warm the cache on a compute node; the jobs will each" >&2
         echo "         precompile on first load, which is slow but not fatal." >&2
         echo "         --skip-precompile-warmup silences this step." >&2
