@@ -10,12 +10,11 @@ mutable struct Node
     localdualbd::Float64
     pruned::Bool
     fixvars::Dict{Tuple{Int64, Symbol, Int64, Int64}, Float64}
-    cuts
     sol
     heursol
 
     function Node(nodeid::Int, parentid::Int, sibling::Int, depth::Int, isleave::Bool, ZBs, fixvars)
-        new(nodeid, parentid, [], sibling, depth, isleave, ZBs, 0.0, false, fixvars, [])
+        new(nodeid, parentid, [], sibling, depth, isleave, ZBs, 0.0, false, fixvars)
     end
 
 end
@@ -26,7 +25,7 @@ function nodeHasChilds(node::Node)
 end
 
 # create root node
-function creatRootNode(dims, BST, Zdims, tol, globalZBs, globalfixvars)
+function createRootNode(dims, BST, Zdims, tol, globalZBs, globalfixvars)
     # diagonal real [0,1], imag 0. nondiagonal [-1,1]
     fixvars = deepcopy(globalfixvars)
     ZBs = []
@@ -44,7 +43,7 @@ function creatRootNode(dims, BST, Zdims, tol, globalZBs, globalfixvars)
             push!(ZBs, ZB)
             # Imaginary part is anti-symmetric fix the vars
             for tj in 1:dim
-                fixvars[(Zind, IM, tj, tj)] = 0.0
+                fixvars[(Zind, :IM, tj, tj)] = 0.0
             end
             return nothing
         end
@@ -54,5 +53,4 @@ function creatRootNode(dims, BST, Zdims, tol, globalZBs, globalfixvars)
 
     return Node(1, -1, -1, 0, true, ZBs, fixvars)
 end
-
 

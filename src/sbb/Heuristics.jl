@@ -1,4 +1,3 @@
-using TensorOperations
 function constructFullSol(Xvals)
     Hbar = 1.0
     nsubs = length(Xvals[:RE])
@@ -27,27 +26,6 @@ function validate(Xvals)
     end
 end
 
-function diff(Xvals1, Xvals2)
-    difference_norm = norm([Xvals1[:RE][i] - Xvals2[:RE][i] + im * (Xvals1[:IM][i] - Xvals2[:IM][i]) for i in 1:length(Xvals1[:RE])])
-end
-
-
-function principleSubStates(Xvals)
-    nsubs = length(Xvals[:RE])
-    substates = []
-    for i in 1:nsubs
-        X = Xvals[:RE][i] + im * Xvals[:IM][i]
-        eigvals, eigvecs = eigen(X)
-        # Extract the eigenvector corresponding to the maximum eigenvalue
-        maxndex = argmax(real(eigvals))   # Index of the maximum eigenvalue
-        x = eigvecs[:, maxndex]     # Corresponding eigenvector
-        # normalize the eigenvector
-        x = x / norm(x)
-        push!(substates, x)
-    end
-    return substates
-end
-
 function principleSubStatesMat(Xvals)
     nsubs = length(Xvals[:RE])
     Xvals_ = Dict(:RE=>[], :IM=>[])
@@ -60,34 +38,6 @@ function principleSubStatesMat(Xvals)
     return Xvals_
 end
 
-function restrict(H, Xvals, nsubs, dims, j)
-    model = Model()
-    subdim = dims[j]
-    XR = @variable(model, [1:subdim, 1:subdim], Symmetric)
-    XI = @variable(model, [1:subdim, 1:subdim] in SkewSymmetricMatrixSpace())
-    @constraint(model, tr(XR) == 1.0)
-    @constraint(model, [XR XI; -XI XR] in PSDCone())
-
-    # Construct the Kronecker product
-    kron_prod = 1.0 + 0 * im
-    for l in 1:nsubs
-        if l == j
-            kron_prod = @expression(model, kron(kron_prod, XR + im * XI))
-        else
-            principle = Xvals[:RE][l] + im * Xvals[:IM][l]
-            kron_prod = @expression(model, kron(kron_prod, principle))
-        end
-    end
-
-    sepaobj = @expression(model, dot(H[:RE], real(kron_prod)) + dot(H[:IM], imag(kron_prod)) )
-
-    @objective(model, Max, sepaobj )
-
-    Xs = Dict(:RE=>XR, :IM=>XI)
-    optmodel = OptModel(model, Xs, nothing, nothing, nothing)
-    return optmodel
-end
-
 function initalDensityMats(dims, seed)
     Vvals = [ rand(seed, dim, dim) + im * rand(seed, dim, dim)  for dim in dims]
     # Scale up the random matrices to avoid small values
@@ -98,62 +48,7 @@ function initalDensityMats(dims, seed)
     return Xvals
 end
 
-
-function AlternativeDescentSDP(H, Xvals_, dims, seed, param)
-    maxiter = 100
-    if isnothing(Xvals_)
-        Xvals = initalDensityMats(dims, seed)
-    else
-        Xvals = deepcopy(Xvals_)
-    end
-    nsubs = length(dims)
-    bestHbar = constructFullSol(Xvals)
-    bestobj = dot(real(bestHbar), H[:RE]) + dot(imag(bestHbar), H[:IM])
-    bestXvals = Xvals
-    prevobj = bestobj
-    fail = 0
-
-    Xvals = principleSubStatesMat(Xvals)
-    for i in 1:maxiter
-        sys = i % nsubs + 1
-        optmodel = restrict(H, Xvals, nsubs, dims, sys)
-        status, solverstatus, sol = solveModel(optmodel, nothing, param, true, true)
-
-        if status == RelaxFeasible || status == RelaxOptimal
-            Xval = projectDensityMat(sol.Xval[:RE] + im * sol.Xval[:IM])
-            Xvals[:RE][sys] = real(Xval)
-            Xvals[:IM][sys] = imag(Xval)
-            Hbar = constructFullSol(Xvals)
-            obj = dot(real(Hbar), H[:RE]) + dot(imag(Hbar), H[:IM])
-
-            if obj > bestobj
-                bestXvals = deepcopy(Xvals)
-                bestHbar = deepcopy(Hbar)
-                bestobj = obj
-            else
-                fail += 1
-            end
-            if abs(obj - prevobj) < param.obj_tol
-                break
-            end
-            if fail >= 5
-                break
-            end
-            prevobj = obj
-        else
-            break
-        end
-        i += 1
-    end
-    return bestobj, bestXvals, bestHbar
-end
-
-function partialfunc(X, kron_prod_left, kron_prod_right, H)
-    kron_prod = kron(kron_prod_left, X , kron_prod_right)
-    return dot(H[:RE], real(kron_prod)) + dot(H[:IM], imag(kron_prod))
-end
-
-function compute_inner_product_map_vectorized(A, C, D)
+function partialInnerProductMap(A, C, D)
     """
     Most efficient vectorized version using Einstein summation pattern.
 
@@ -230,9 +125,7 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
                 kron_prod_right = kron(kron_prod_right, X[l])
             end
         end
-        #gX = gradient(p -> partialfunc(p, kron_prod_left, kron_prod_right, problem.H), X[sys])[1]
-        gX = compute_inner_product_map_vectorized(Matrix(kron_prod_left), Matrix(kron_prod_right), problem.H[:RE] + im * problem.H[:IM])
-        #gX = real(gX) + imag(gX) + im * ( real(gX) - imag(gX) )
+        gX = partialInnerProductMap(Matrix(kron_prod_left), Matrix(kron_prod_right), problem.H[:RE] + im * problem.H[:IM])
         rgX = (gX + gX') / 2
         eigvals, eigvecs = eigen(rgX)
         # Extract the eigenvector corresponding to the maximum eigenvalue
@@ -265,7 +158,6 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
         prevobj = obj
         i += 1
     end
-    #print("find a primal bound $(bestobj) by Alternative descent\n")
     if bestobj > stateseparator.primalbd
         stateseparator.primalbd = bestobj
         stateseparator.primalsol = bestXvals
@@ -280,59 +172,14 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
     return bestXvals
 end
 
-function SphereOpt(stateseparator::StateSeparator, H, Xvals_)
-    problem = stateseparator.problem
-    dims = problem.dims
-    sol, _ = SphereSolve(problem.dims, problem.nsubs, H, problem.dimH, Xvals_, stateseparator.seed, stateseparator.param)
-    Hbar = constructFullSol(sol)
-    primal = dot(real(Hbar), problem.H[:RE]) + dot(imag(Hbar), problem.H[:IM])
-    #if !isnothing(stateseparator.primalsol)
-    #    print("find primal bound $(primal) $(distance(Xvals_, sol)) $(distance(Xvals_, stateseparator.primalsol))\n")
-    #end
-    #print("find a primal bound $(primal) $(tr(Hbar)) $(tr(H)) by manifoldopt\n")
-    if primal > stateseparator.primalbd
-        if stateseparator.param.log_level > 0
-            print("--find a better primal bound $(primal) by manifoldopt\n")
-        end
-        stateseparator.primalbd = primal
-        stateseparator.primalsol = sol
-        stateseparator.primalHbar = Hbar
-        stateseparator.primaloutbd = dot(problem.Hout[:RE], real(Hbar)) + dot(problem.Hout[:IM], imag(Hbar))
-    end
-    return sol
-end
-
-function AlternativeDescent(stateseparator::StateSeparator, Xvals)
-    problem = stateseparator.problem
-    param = stateseparator.param
-    dims = problem.dims
-    bestobj, bestXvals, bestHbar = AlternativeDescentSDP(problem.H, Xvals, dims, stateseparator.seed, param)
-    #print("find a primal bound $(bestobj) by Alternative descent\n")
-    if bestobj > stateseparator.primalbd
-        stateseparator.primalbd = bestobj
-        stateseparator.primalsol = bestXvals
-        stateseparator.primalHbar = bestHbar
-        stateseparator.primaloutbd = dot(problem.Hout[:RE], real(bestHbar)) + dot(problem.Hout[:IM], imag(bestHbar))
-        if stateseparator.param.log_level > 0
-            print("--find a better primal bound $(bestobj) by Alternative descent\n")
-        end
-        validate(bestXvals)
-    end
-    return bestXvals
-end
-
-
 function RunHeuristicsRoot(stateseparator::StateSeparator)
     problem = stateseparator.problem
-    #H = problem.H[:RE] +  im * problem.H[:IM]
     AlternativeDescentEigen(stateseparator, nothing)
-    #SphereOpt(stateseparator, H, nothing)
 end
 
 function RunHeuristics(stateseparator::StateSeparator, sol)
     problem = stateseparator.problem
-    #H = problem.H[:RE] +  im * problem.H[:IM]
     Xvals = AlternativeDescentEigen(stateseparator::StateSeparator, sol.Xvals)
-    #Xvals = SphereOpt(stateseparator::StateSeparator, H, sol.Xvals)
     return Xvals
 end
+

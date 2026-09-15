@@ -1,2 +1,6 @@
 .julia_depot/
 outputs/
+__pycache__/
+*.pyc
+results/traces/
+results/logs/

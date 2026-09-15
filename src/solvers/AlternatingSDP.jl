@@ -1,75 +1,61 @@
-struct alternateModel
+"""
+    AlternateModel
+
+One restricted SDP of the alternating method: `Xvars` are the free subsystem
+density matrices (one per rank-one component), `ysvars` their lifted tensors,
+`z` the interpolation variable, and `constensor` the coupling constraints whose
+duals drive the pricing step.
+"""
+struct AlternateModel
     model::Model
     Xvars
     ysvars
     z
     constensor
-
-    function alternateModel(model::Model, Xvars, ysvars, z, constensor)
-        return new(model, Xvars, ysvars, z, constensor)
-    end
 end
 
+"""
+    solveAlternate(alternatemodel, param, silent = true)
+
+Solve one restricted SDP. Returns `(relaxstatus, solver_status, sol)`; `sol`
+carries the duals needed for pricing even when the model is infeasible.
+"""
 function solveAlternate(alternatemodel, param::Param, silent = true)
-    if param.solver == "MSK"
-        model = alternatemodel.model
-        setMosekParam(model, param)
-        if param.log_level <= 2 || silent
-            set_silent(model)
-        end
-        optimize!(model)
-        status = termination_status(model)
-        primal_status = JuMP.primal_status(model)
-        dual_status = JuMP.dual_status(model)
-        dualobj = dual_objective_value(model)
-        primalobj = objective_value(model)
-        relaxstatus = RelaxError
-        if status == OPTIMAL
-            relaxstatus = RelaxOptimal
-            dualobj = primalobj
-        elseif status == INFEASIBLE || dual_status == INFEASIBILITY_CERTIFICATE
-            relaxstatus = RelaxInfeasibleCertificate
-        elseif status == SLOW_PROGRESS || status == ITERATION_LIMIT
-            if primal_status == NO_SOLUTION || primal_status == UNKNOWN_RESULT_STATUS || dual_status == UNKNOWN_RESULT_STATUS
-                relaxstatus = RelaxNoSolution
-            elseif objective_sense(model) == JuMP.MIN_SENSE && primalobj + 1e-4  < dualobj
-                relaxstatus = RelaxInfeasible
-            elseif objective_sense(model) == JuMP.MAX_SENSE && primalobj > dualobj + 1e-4
-                relaxstatus = RelaxInfeasible
-            else
-                relaxstatus = RelaxFeasible
-            end
-        end
-        #println(primalobj , dualobj , param.obj_tol)
-        #print(solution_summary(model))
-        #println("Alternate solve status: ", status, ", relaxstatus: ", relaxstatus, ", primalobj: ", primalobj, ", dualobj: ", dualobj)
-        if relaxstatus == RelaxOptimal || relaxstatus == RelaxFeasible
-            Xval = Dict(
-                :RE => [value.(xvar) for xvar in alternatemodel.Xvars[:RE]],
-                :IM => [value.(xvar) for xvar in alternatemodel.Xvars[:IM]]
-            )
-            ysval = Dict(
-                :RE => [value.(yvar) for yvar in alternatemodel.ysvars[:RE]],
-                :IM => [value.(yvar) for yvar in alternatemodel.ysvars[:IM]]
-            )
-            # Fix: Apply dual.() to each constraint individually
-            Xdual = Dict(
-                :RE => [dual.(cons) for cons in alternatemodel.constensor[:RE]],
-                :IM => [dual.(cons) for cons in alternatemodel.constensor[:IM]]
-            )
-            sol = (Xval = Xval, ysval = ysval, Xdual = Xdual, dualobj = dualobj, primalobj = primalobj)
-            return relaxstatus, status, sol
-        elseif relaxstatus == RelaxInfeasibleCertificate
-            Xdual = Dict(
-                :RE => [dual.(cons) for cons in alternatemodel.constensor[:RE]],
-                :IM => [dual.(cons) for cons in alternatemodel.constensor[:IM]]
-            )
-            sol = (Xdual = Xdual, dualobj = dualobj, primalobj = primalobj)
-            return relaxstatus, status, sol
-        else
-            return relaxstatus, status, nothing
-        end
+    model = alternatemodel.model
+    setMosekParam(model, param)
+    if param.log_level <= 2 || silent
+        set_silent(model)
     end
+    optimize!(model)
+    status = termination_status(model)
+    primalobj = objective_value(model)
+    dualobj = dual_objective_value(model)
+    relaxstatus = classifyStatus(objective_sense(model), status, JuMP.primal_status(model), JuMP.dual_status(model),
+                                 primalobj, dualobj;
+                                 obj_tol = 1e-4,
+                                 infeasible_tag = RelaxInfeasibleCertificate,
+                                 unknown_is_nosolution = true)
+    relaxstatus == RelaxOptimal && (dualobj = primalobj)
+
+    duals() = Dict(
+        :RE => [dual.(cons) for cons in alternatemodel.constensor[:RE]],
+        :IM => [dual.(cons) for cons in alternatemodel.constensor[:IM]],
+    )
+    if relaxstatus == RelaxOptimal || relaxstatus == RelaxFeasible
+        Xval = Dict(
+            :RE => [value.(xvar) for xvar in alternatemodel.Xvars[:RE]],
+            :IM => [value.(xvar) for xvar in alternatemodel.Xvars[:IM]],
+        )
+        ysval = Dict(
+            :RE => [value.(yvar) for yvar in alternatemodel.ysvars[:RE]],
+            :IM => [value.(yvar) for yvar in alternatemodel.ysvars[:IM]],
+        )
+        return relaxstatus, status, (Xval = Xval, ysval = ysval, Xdual = duals(),
+                                     dualobj = dualobj, primalobj = primalobj)
+    elseif relaxstatus == RelaxInfeasibleCertificate
+        return relaxstatus, status, (Xdual = duals(), dualobj = dualobj, primalobj = primalobj)
+    end
+    return relaxstatus, status, nothing
 end
 
 function restrict(Min, Mdir, Xvals, nsubs, dims, nrank1, freesyss)
@@ -119,7 +105,7 @@ function restrict(Min, Mdir, Xvals, nsubs, dims, nrank1, freesyss)
 
     @objective(model, Max, z)
 
-    alternatemodel = alternateModel(model, Xvars, ysvars, z, constensor)
+    alternatemodel = AlternateModel(model, Xvars, ysvars, z, constensor)
     return alternatemodel
 end
 
@@ -142,8 +128,7 @@ function price(Xdual, Xvals, nrank1, nsubs, freesyss)
                     kron_prod_right = kron(kron_prod_right, Xvals[idx][l])
                 end
             end
-            gX = compute_inner_product_map_vectorized(Matrix(kron_prod_left), Matrix(kron_prod_right), Xdual[:RE][idx] + im * Xdual[:IM][idx])
-            #gX = real(gX) + imag(gX) + im * ( real(gX) - imag(gX) )
+            gX = partialInnerProductMap(Matrix(kron_prod_left), Matrix(kron_prod_right), Xdual[:RE][idx] + im * Xdual[:IM][idx])
             rgX = (gX + gX') / 2
             Xval = Xvals[idx][sys]
             eigenvalues, eigvecs = eigen(Xval)
@@ -248,7 +233,7 @@ function alternateSolve(dims, H, purestates, substates, weights, param, firstrun
             break
         end
 
-        if is_time_limit_exceeded(param)
+        if isTimeLimitExceeded(param)
             println("Time limit exceeded, exiting...")
             break
         end

@@ -18,5 +18,5 @@ PARAM=$(sed -n "${LINENUM}p" job_list.txt)
 # 拆分参数
 read juliabin instance algorithm timelimit <<< "$PARAM"
 
-echo "$juliabin" "--project=."  "src/main.jl" $instance $algorithm $timelimit
-srun "$juliabin" --project=. src/main.jl -s "$instance" -a "$algorithm" -t "$timelimit" > outputs/output_${instance}_${algorithm}.out
+echo "$juliabin" "--project=."  "scripts/run_experiment.jl" $instance $algorithm $timelimit
+srun "$juliabin" --project=. scripts/run_experiment.jl -s "$instance" -a "$algorithm" -t "$timelimit" > outputs/output_${instance}_${algorithm}.out

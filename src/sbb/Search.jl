@@ -17,7 +17,6 @@ function solveModel(optmodel::OptModel, BST, param::Param, silent = false, restr
             Zs = optmodel.Zs
             function getValueAuxSysVars(sys, leftsys, rightsys, retleft, retright)
                push!(Zvals, Dict(:RE => value.(Zs[:RE][sys.Zind]), :IM => value.(Zs[:IM][sys.Zind])))
-               #push!(Zrcosts, Dict(:RE => reduced_cost.(Zvars[:RE][sys.Zind]), :IM => reduced_cost.(Zvars[:IM][sys.Zind])))
                return nothing
             end
             traverseDPSBST(1, BST, getValueAuxSysVars)
@@ -28,6 +27,12 @@ function solveModel(optmodel::OptModel, BST, param::Param, silent = false, restr
    end
 end
 
+"""
+    threshold!(problem, param, effortlevel = 0)
+
+Solve the tensor-RLT / DDPS+ relaxation once at the sBB root and return its
+objective: a valid lower bound on the white-noise mixing threshold (`-a RLT`).
+"""
 function threshold!(problem::Problem, param::Param, effortlevel = 0)
    # create a StateSeparator problem data structure
    print("--separating...\n")
@@ -35,13 +40,13 @@ function threshold!(problem::Problem, param::Param, effortlevel = 0)
    BST = problem.BST
 
    # initial the node list
-   rootnode = creatRootNode(problem.dims, BST, problem.Zdims, param.feas_tol, problem.globalZBs, problem.fixvars)
+   rootnode = createRootNode(problem.dims, BST, problem.Zdims, param.feas_tol, problem.globalZBs, problem.fixvars)
    stateseparatorAddNode!(stateseparator, rootnode)
    stateseparator.selectnode = 1
 
    focusnodeid = pop!(stateseparator.opennodes)
    focusnode = stateseparatorGetNode(stateseparator, focusnodeid)
-   optmodel = initRelaxationThreshold(stateseparator, focusnode, true )
+   optmodel = initRelaxationThreshold(stateseparator, focusnode)
 
    focusnode.localdualbd = Inf
    status, solverstatus, sol = solveModel(optmodel, BST, stateseparator.param)
@@ -53,13 +58,27 @@ function threshold!(problem::Problem, param::Param, effortlevel = 0)
    return sol.dualobj
 end
 
+"""
+    separate!(problem, param, effortlevel = 0, globalobbt = false)
+
+The linear-minimisation oracle: a spatial branch-and-bound over the relaxations
+of `StateRelaxation.jl`, looking for an extreme point of the separable tensor
+cone that violates the current master cut.
+
+Returns `(primal, dual, Hbar, sol)`. `dual` is a valid lower bound for the LMO
+problem even when the search is cut short by the node limit, which is what makes
+`lb_relx` valid at any time.
+
+`effortlevel` 0/1 stop as soon as a violated cut is found; level 2 is the
+gap-closing mode used once `param.is_last` is set, and runs to the larger
+`param.maxeffortnnodes` node limit.
+"""
 function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt = false)
    # create a StateSeparator problem data structure
    print("--separating...\n")
    stateseparator = StateSeparator(problem, param)
    BST = problem.BST
    if stateseparator.param.log_level > 0
-      #print("stateseparator system dimension: $(stateseparator.problem.dimH), number of subsystems: $(stateseparator.problem.nsubs)\n")
    end
    # establish the initial primal bound
    RunHeuristicsRoot(stateseparator)
@@ -68,7 +87,7 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
       return  stateseparator.primaloutbd, stateseparator.dualbd, stateseparator.primalHbar, stateseparator.primalsol
    end
    # initial the node list
-   rootnode = creatRootNode(problem.dims, BST, problem.Zdims, param.feas_tol, problem.globalZBs, problem.fixvars)
+   rootnode = createRootNode(problem.dims, BST, problem.Zdims, param.feas_tol, problem.globalZBs, problem.fixvars)
    stateseparatorAddNode!(stateseparator, rootnode)
    if globalobbt && param.max_obbt > 0
       isfeasible = BoundTighten(stateseparator, rootnode, globalobbt)
@@ -98,10 +117,7 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
          if focusnode.pruned
             continue
          end
-         optmodel = initRelaxationNode(stateseparator, focusnode, stateseparator.primalbd, effortlevel >= 2 && param.enable_dps )
-         #if effortlevel >= 2
-         #   addCuts(stateseparator, optmodel, focusnode, param)
-         #end
+         optmodel = initRelaxationNode(stateseparator, focusnode, stateseparator.primalbd)
          focusnode.localdualbd = Inf
          status, solverstatus, sol = solveModel(optmodel, BST, stateseparator.param)
          if isnothing(status) || !(status == RelaxFeasible || status == RelaxOptimal || status == RelaxInfeasible)
@@ -122,10 +138,6 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
             focusnode.heursol = RunHeuristics(stateseparator, sol)
          end
          # separation from pool
-         #if cutrelaxationround <= maxcutrelaxationround && effortlevel >= 2
-         #   time_cuts = @elapsed separateCutLocal(stateseparator, optmodel, focusnode, param)
-         #   println("Time to add cuts: $(time_cuts) seconds\n")
-         #end
       end
 
       # update the node status and global dual bound of the tree

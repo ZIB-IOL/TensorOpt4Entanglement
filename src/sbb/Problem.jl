@@ -76,9 +76,6 @@ mutable struct OptModel
    Xs
    Y
    Zs
-   Zvars
 
-   function OptModel(model, Xs, Y, Zs, Zvars)
-      new(model, Xs, Y, Zs, Zvars)
-   end
+   OptModel(model, Xs, Y, Zs) = new(model, Xs, Y, Zs)
 end

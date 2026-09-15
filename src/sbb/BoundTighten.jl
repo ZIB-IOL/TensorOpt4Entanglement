@@ -5,7 +5,6 @@ function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobb
     Zdims = stateseparator.problem.Zdims
     primalbd = stateseparator.primalbd
     isfeasible = true
-    #copynode = deepcopy(focusnode)
     function tighten(sys, leftsys, rightsys, retleft, retright)
         if sys.parent != -1
             Zind = sys.Zind
@@ -27,7 +26,6 @@ function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobb
                                 if !isnothing(status) &&  (status == RelaxFeasible || status == RelaxOptimal)
                                     focusnode.ZBs[Zind][part, direction][tj, tk] = direction == :L ? sol.dualobj - stateseparator.param.tol : - sol.dualobj + stateseparator.param.tol
                                 end
-                                #print(sol.dualobj, "\n")
                             end
                             tol = stateseparator.param.feas_tol * maximum((1,0,abs( focusnode.ZBs[Zind][part, :U][tj, tk]), abs(focusnode.ZBs[Zind][part, :L][tj, tk]) ))
                             if abs( focusnode.ZBs[Zind][part, :U][tj, tk] - focusnode.ZBs[Zind][part, :L][tj, tk] ) < tol
@@ -40,7 +38,6 @@ function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobb
                     end
                 end
             end
-            #print(focusnode.ZBs[Zind])
             if stateseparator.param.log_level > 1
                 print("finished bound tightenning for Z$(Zind)\n")
             end
@@ -49,7 +46,6 @@ function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobb
     for i in 1:stateseparator.param.max_obbt
         print("obbt round: $(i) \n")
         traverseDPSBST(1, BST, tighten)
-        #copynode = deepcopy(focusnode)
     end
     if stateseparator.param.log_level > 1 && !isfeasible
         print("bound tightenning implies no better solution\n")

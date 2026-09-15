@@ -5,7 +5,6 @@ mutable struct StateSeparator
    opennodes::Vector{Int64}
    leaves::Set{Int}
    maxdepth::Int
-   plungedepth::Int
    nodes::Vector{Node}
    dualbd::Float64
    primalbd::Float64
@@ -25,19 +24,17 @@ mutable struct StateSeparator
       opennodes = []
       leaves = Set{Int}()
       maxdepth = 0
-      plungedepth = 0
       nodes = []
       primalsol = nothing
       primalHbar = nothing
       selectnode = 1
       seed = MersenneTwister(param.seed)
       status = RelaxUnsolve
-      stateseparator = new(problem, param, opennodes, leaves, maxdepth, plungedepth, nodes,
+      stateseparator = new(problem, param, opennodes, leaves, maxdepth, nodes,
          dualbd, primalbd, primaloutbd, cutoffbound, primalsol, primalHbar, selectnode, seed, status)
       return stateseparator
    end
  end
-
 
  function stateseparatorAddNode!(stateseparator::StateSeparator, node::Node)
     push!(stateseparator.nodes, node)
@@ -74,13 +71,11 @@ mutable struct StateSeparator
           if !node.pruned && node.localdualbd < stateseparator.primalbd - stateseparator.param.obj_tol
              node.pruned = true
              findprune = true
-             #print((node.nodeid, length(stateseparator.nodes), node.localdualbd, stateseparator.primalbd + stateseparator.param.obj_tol))
              stateseparatorPruneSubtree!(stateseparator, node.nodeid)
           end
           if !node.pruned && nodeHasChilds(node) && stateseparator.nodes[node.childs[1]].pruned && stateseparator.nodes[node.childs[2]].pruned
              node.pruned = true
              findprune = true
-             #print((node.nodeid, length(stateseparator.nodes), node.localdualbd, stateseparator.primalbd + stateseparator.param.obj_tol))
              stateseparatorPruneSubtree!(stateseparator, node.nodeid)
           end
        end

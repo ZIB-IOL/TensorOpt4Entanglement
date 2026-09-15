@@ -44,7 +44,6 @@ function buildBST(arr, treeidct, BST, parent=-1)
     end
 end
 
-
 function traverseDPSBST(treeid, BST, funcsys, params...)
     sys = BST[treeid]
     leftsys = nothing
@@ -62,26 +61,3 @@ function traverseDPSBST(treeid, BST, funcsys, params...)
     return funcsys(sys, leftsys, rightsys, retleft, retright, params...)
 end
 
-function traverseBFSBST(root_treeid, BST, funcsys, params...)
-    queue = [root_treeid]
-    while !isempty(queue)
-        treeid = popfirst!(queue)
-        sys = BST[treeid]
-
-        leftsys = nothing
-        rightsys = nothing
-        retleft = nothing
-        retright = nothing
-
-        if sys.left != -1
-            push!(queue, sys.left)
-            leftsys = BST[sys.left]
-        end
-
-        if sys.right != -1
-            push!(queue, sys.right)
-            rightsys = BST[sys.right]
-        end
-        funcsys(sys, leftsys, rightsys, retleft, retright, params...)
-    end
-end
