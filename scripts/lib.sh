@@ -19,6 +19,9 @@ BENCHMARK_DIR="${BENCHMARK_DIR:-$REPO_ROOT/benchmark}"
 # `set_part <name>` is called by each experiment script before running.
 PART="${PART:-}"
 declare -A _JOBLIST_STARTED
+# optional narrowing, set by --state / --algo
+ONLY_STATES=()
+ONLY_ALGOS=()
 set_part() {
     PART="$1"
     RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results/$PART}"
@@ -64,6 +67,8 @@ parse_args() {
             -f|--force)       FORCE=1; shift ;;
             -n|--dry-run)     DRY_RUN=1; shift ;;
             -t|--time-limit)  TIME_LIMIT="$2"; shift 2 ;;
+            -s|--state)       ONLY_STATES+=("$2"); shift 2 ;;
+            -a|--algo)        ONLY_ALGOS+=("$2"); shift 2 ;;
             --slurm)          USE_SLURM=1; shift ;;
             --results-dir)    RESULTS_DIR="$2"; shift 2 ;;
             --trace-dir)      TRACE_DIR="$2"; shift 2 ;;
@@ -155,6 +160,32 @@ run_table() {
     local states; mapfile -t states < <(instances_with_m "$m")
     if [[ ${#states[@]} -eq 0 ]]; then
         echo "ERROR: no benchmark instances with N = $m in $BENCHMARK_DIR" >&2; exit 1
+    fi
+
+    # --state / --algo narrow the run to a single job or a handful. A request
+    # for something this experiment does not contain is an error rather than a
+    # silent no-op, so a typo cannot look like a completed run.
+    if [[ ${#ONLY_ALGOS[@]} -gt 0 ]]; then
+        local keep=() a want
+        for want in "${ONLY_ALGOS[@]}"; do
+            for a in "${algos[@]}"; do [[ "$a" == "$want" ]] && keep+=("$a"); done
+        done
+        if [[ ${#keep[@]} -eq 0 ]]; then
+            echo "ERROR: none of '${ONLY_ALGOS[*]}' belong to $table (has: ${algos[*]})" >&2
+            exit 1
+        fi
+        algos=("${keep[@]}")
+    fi
+    if [[ ${#ONLY_STATES[@]} -gt 0 ]]; then
+        local keepst=() st want
+        for want in "${ONLY_STATES[@]}"; do
+            for st in "${states[@]}"; do [[ "$st" == "$want" ]] && keepst+=("$st"); done
+        done
+        if [[ ${#keepst[@]} -eq 0 ]]; then
+            # not an error: the instance may simply belong to another size
+            return 0
+        fi
+        states=("${keepst[@]}")
     fi
 
     echo "=============================================================="

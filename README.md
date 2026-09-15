@@ -168,7 +168,37 @@ by running the same command again; only the missing jobs are queued. `--force`
 ignores existing results and redoes everything. When nothing is left to do,
 nothing is submitted.
 
-`M="3"` restricts an experiment to one subsystem count.
+### Running part of an experiment
+
+Every level of granularity, from the whole suite down to one job:
+
+```bash
+bash runjobs.sh                                    # everything
+bash runjobs.sh main                               # one experiment
+M=3 bash scripts/exp_main.sh                       # one subsystem count
+bash scripts/exp_main.sh --algo RLT                # one algorithm, all instances
+bash scripts/exp_main.sh --state state_13.jl       # one instance, all algorithms
+bash scripts/exp_main.sh --state state_13.jl --algo D   # exactly one job
+```
+
+`--state` and `--algo` are repeatable and can be combined. Asking for an
+algorithm the experiment does not contain is an error rather than a silent
+no-op, so a typo cannot look like a completed run. Use these rather than
+calling `scripts/run_experiment.jl` directly: they set `EXACTENT_RESULTS_DIR`
+and `EXACTENT_TRACE` for you, so the result lands in the right part directory
+and its trajectory is recorded.
+
+On the cluster, one line of a job list is one job:
+
+```bash
+JOB_LIST=job_list_main.txt sbatch --array=7        run.slurm   # just line 7
+JOB_LIST=job_list_main.txt sbatch --array=7,12,30  run.slurm   # a few
+JOB_LIST=job_list_main.txt sbatch run.slurm 7                  # without an array
+```
+
+That is how you re-run the handful of array elements that failed, without
+resubmitting the rest — though simply re-running `runjobs.sh` does the same
+thing, since completed jobs are skipped.
 
 ### One entry point, two destinations
 
