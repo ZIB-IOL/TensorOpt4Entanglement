@@ -1,351 +1,113 @@
 #!/usr/bin/env python3
-"""Generate the LaTeX bodies of the paper's experimental tables from results/.
+"""Generate the LaTeX bodies of the paper's tables from saved results.
 
+This is a dispatcher: each table family lives in its own module under
+`scripts/tables/`, and this script routes a table name to its owner.
+
+    scripts/tables/main.py        m3, m4, m5     main results
+    scripts/tables/lowrank.py     m5low          LADMM rank sweep
+    scripts/tables/gapclosing.py  m5cp           CP gap-closing averages
+    scripts/tables/ddps.py        ddps3/4/5      DDPS vs DDPS+ ablation
+    scripts/tables/memory.py      mem3/4/5       per-level memory
+    scripts/tables/size.py        size3/4/5      relaxation size and file size
+
+Usage
     python3 scripts/make_tables.py --table all
     python3 scripts/make_tables.py --table m3 --out tables/
+    python3 scripts/make_tables.py --manifest      # raw file behind every cell
+    python3 scripts/make_tables.py --list          # tables and their experiments
 
-Tables
-    m3, m4, m5      main results, one block per state
-    m5low           low-rank LADMM sweep (r = 400..900)
-    m5cp            averages over gap-closing CP iterations (needs traces)
-
-The PDGR rows in the paper come from an external implementation
-(liu2025unified / FrankWolfe.jl) and are not generated here; they are emitted
-as a commented placeholder so the block can be pasted in directly.
+Results are searched in results/main, results/lowrank, results/ddps, then
+results/ itself (the flat files published with the paper), first hit winning,
+so a fresh run shadows the published one without deleting it.
 """
-import argparse, math, os, re, sys, csv
+import argparse
+import os
+import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Experiments write into their own directory; `results/` itself still holds the
-# flat files published with the paper. Searched in order, first hit wins, so a
-# fresh run shadows the published one.
-RESULT_DIRS = [os.path.join(ROOT, "results", p) for p in ("main", "lowrank", "ddps")]
-RESULT_DIRS.append(os.path.join(ROOT, "results"))
-TRACE_DIRS = [os.path.join(d, "traces") for d in RESULT_DIRS]
-
-# algorithm code -> (display name, emphasise?)  emphasis marks methods
-# developed in this paper, matching the existing tables.
-MAIN_ROWS = [("A", "Alt-SDP", False), ("LD1", "LADMM", True), ("D", "CP", True),
-             ("LDL", "IR", True), ("PPT", "DPS", False), ("RLT", "DDPS+", True)]
-LOWRANK_ROWS = [(f"LDR{i}", f"LADMM\\_{r}", True)
-                for i, r in enumerate((400, 500, 600, 700, 800, 900))]
-GAPCLOSING_ROWS = [("D", "CP", True), ("LDL", "IR", True)]
-# DDPS vs DDPS+ ablation: the same three algorithms with the sBB oracle
-# restricted to the plain DDPS outer approximation, and with the McCormick
-# families added.
-DDPS_ROWS = [("RLT_DDPS", "DDPS", True),      ("RLT", "DDPS+", True),
-             ("D_DDPS", "CP (DDPS)", True),   ("D", "CP (DDPS+)", True),
-             ("LDL_DDPS", "IR (DDPS)", True), ("LDL", "IR (DDPS+)", True)]
-# one representative algorithm per instance is enough for the size table
-SIZE_ROWS = [("RLT", "DDPS+", True), ("RLT_DDPS", "DDPS", True)]
-
-TABLES = {
-    "m3":    dict(m=3, rows=MAIN_ROWS,       kind="main"),
-    "m4":    dict(m=4, rows=MAIN_ROWS,       kind="main"),
-    "m5":    dict(m=5, rows=MAIN_ROWS,       kind="main"),
-    "m5low": dict(m=5, rows=LOWRANK_ROWS,    kind="main"),
-    "m5cp":  dict(m=5, rows=GAPCLOSING_ROWS, kind="gapclosing"),
-    "ddps3": dict(m=3, rows=DDPS_ROWS,       kind="main"),
-    "ddps4": dict(m=4, rows=DDPS_ROWS,       kind="main"),
-    "ddps5": dict(m=5, rows=DDPS_ROWS,       kind="main"),
-    "mem3":  dict(m=3, rows=MAIN_ROWS,       kind="mem"),
-    "mem4":  dict(m=4, rows=MAIN_ROWS,       kind="mem"),
-    "mem5":  dict(m=5, rows=MAIN_ROWS,       kind="mem"),
-    "size3": dict(m=3, rows=SIZE_ROWS,       kind="size"),
-    "size4": dict(m=4, rows=SIZE_ROWS,       kind="size"),
-    "size5": dict(m=5, rows=SIZE_ROWS,       kind="size"),
-}
+import tables
+from tables.common import (ROOT, RESULT_DIRS, TRACE_DIRS, PROVENANCE, Context,
+                           load_instances, display_name)
 
 
-def load_instances(benchmark_dir):
-    """Map benchmark filename -> (display name, subsystem count)."""
-    out = {}
-    for fn in sorted(os.listdir(benchmark_dir)):
-        if not fn.endswith(".jl"):
-            continue
-        text = open(os.path.join(benchmark_dir, fn)).read()
-        n = re.search(r"^N\s*=\s*(\d+)\s*$", text, re.M)
-        name = re.search(r'^name\s*=\s*"([^"]+)"', text, re.M)
-        if n and name:
-            out[fn] = (name.group(1), int(n.group(1)))
-    return out
-
-
-# every cell resolved during this process, for --manifest
-PROVENANCE = {}
-
-
-def load_result(results_dirs, state, algo):
-    """First matching raw file across the search path, or None."""
-    if isinstance(results_dirs, str):
-        results_dirs = [results_dirs]
-    path = next((os.path.join(d, f"{state}_{algo}")
-                 for d in results_dirs
-                 if os.path.isfile(os.path.join(d, f"{state}_{algo}"))), None)
-    if path is None:
-        return None
-    PROVENANCE[(state, algo)] = os.path.relpath(path, ROOT)
-    rec = {}
-    for line in open(path):
-        if ":" in line:
-            k, v = line.split(":", 1)
-            rec[k.strip()] = v.strip()
-    try:
-        out = dict(glbub=float(rec["glbub"]), glblb=float(rec["glblb"]),
-                   approxub=float(rec["approxub"]), approxfeas=float(rec["approxfeas"]),
-                   time=float(rec["time"]))
-        # diagnostics are absent from results produced before they were added
-        for k, cast in (("relax_nvars", int), ("relax_ncons", int),
-                        ("relax_nnz", int), ("peak_rss_mib", float),
-                        ("mem_total_alloc_gib", float), ("mem_cp_alloc_gib", float),
-                        ("mem_lmo_alloc_gib", float), ("mem_ladmm_alloc_gib", float),
-                        ("mem_lmo_calls", int), ("mem_total_peak_rss_mib", float),
-                        ("mem_lmo_model_nnz", int)):
-            try:
-                out[k] = cast(float(rec[k]))
-            except (KeyError, ValueError):
-                out[k] = None
-        return out
-    except (KeyError, ValueError):
-        return None
-
-
-def load_trace_means(trace_dirs, state, algo):
-    """Mean ub_relx / lb_relx / b_lower over the gap-closing CP iterations."""
-    if isinstance(trace_dirs, str):
-        trace_dirs = [trace_dirs]
-    path = next((os.path.join(d, f"{state}_{algo}.cp.csv")
-                 for d in trace_dirs
-                 if os.path.isfile(os.path.join(d, f"{state}_{algo}.cp.csv"))), None)
-    if path is None:
-        return None
-    PROVENANCE[(state, algo + " [trace]")] = os.path.relpath(path, ROOT)
-    ub, lb, b = [], [], []
-    with open(path) as fh:
-        for row in csv.DictReader(fh):
-            if str(row.get("is_last", "")).strip().lower() != "true":
-                continue
-            try:
-                u, l, bb = float(row["ub_relx"]), float(row["lb_relx"]), float(row["b_lower"])
-            except (KeyError, ValueError):
-                continue
-            # a round where the oracle returned no usable bound carries -Inf;
-            # averaging it would swallow the whole column
-            if not (math.isfinite(u) and math.isfinite(l) and math.isfinite(bb)):
-                continue
-            ub.append(u); lb.append(l); b.append(bb)
-    if not ub:
-        return None
-    mean = lambda xs: sum(xs) / len(xs)
-    return dict(ub=mean(ub), lb=mean(lb), b=mean(b), n=len(ub))
-
-
-def fmt(x, dash_when=None):
-    if x is None:
-        return "N/A"
-    if dash_when is not None and dash_when(x):
-        return "-"
-    if not math.isfinite(x):
-        return "-"
-    return f"{x:.5f}"
-
-
-def escape(name):
-    return name.replace("_", r"\_")
-
-
-def display_name(name):
-    """Benchmark names carry a trailing local dimension for GHZ (GHZ_5_2);
-    the paper writes those as GHZ_5. Dicke_5_1 keeps its excitation count."""
-    m = re.match(r"^(GHZ)_(\d+)_2$", name)
-    return f"{m.group(1)}_{m.group(2)}" if m else name
-
-
-def bold(value_str, is_best):
-    return f"\\textbf{{{value_str}}}" if is_best and value_str != "-" else value_str
-
-
-def main_block(states, instances, rows, results_dir):
-    out = []
-    for state in states:
-        disp = escape(display_name(instances[state][0]))
-        # the paper bolds the best upper and lower bound within each state block
-        recs = {a: load_result(results_dir, state, a) for a, _, _ in rows}
-        # compare at the printed precision, so ties that look equal are both bold
-        rnd = lambda v: round(v, 5)
-        ubs = [rnd(r["glbub"]) for r in recs.values()
-               if r and r["glbub"] != 0.0 and math.isfinite(r["glbub"])]
-        lbs = [rnd(r["glblb"]) for r in recs.values() if r and math.isfinite(r["glblb"])]
-        best_ub = min(ubs) if ubs else None      # upper bound: smaller is tighter
-        best_lb = max(lbs) if lbs else None      # lower bound: larger is tighter
-        out.append("\\midrule")
-        out.append(f"\\multirow{{{len(rows)}}}{{*}}{{{disp}}}")
-        for algo, label, emph in rows:
-            shown = f"\\emph{{{label}}}" if emph else label
-            r = recs[algo]
-            if r is None:
-                out.append(f" & {shown} & N/A & N/A & N/A & N/A & N/A \\\\")
-                continue
-            # a zero upper bound means the algorithm reports no upper bound at all
-            ub = bold(fmt(r["glbub"], dash_when=lambda v: v == 0.0),
-                      best_ub is not None and rnd(r["glbub"]) == best_ub)
-            lb = bold(fmt(r["glblb"]),
-                      best_lb is not None and math.isfinite(r["glblb"]) and rnd(r["glblb"]) == best_lb)
-            # the heuristic bound is only meaningful alongside its residual
-            aub = "-" if r["approxfeas"] == 0.0 else fmt(r["approxub"])
-            afe = "-" if r["approxfeas"] == 0.0 else fmt(r["approxfeas"])
-            out.append(f" & {shown} & {ub} & {lb} & {aub} & {afe} & {int(r['time'])} \\\\")
-        if rows is MAIN_ROWS:
-            out.append("% & PDGR & <external: liu2025unified / FrankWolfe.jl> \\\\")
-    out.append("\\bottomrule")
-    return "\n".join(out)
-
-
-def gapclosing_block(states, instances, rows, trace_dir):
-    out, missing = [], 0
-    for state in states:
-        disp = escape(display_name(instances[state][0]))
-        out.append("\\midrule")
-        out.append(f"\\multirow{{{len(rows)}}}{{*}}{{{disp}}}")
-        for algo, label, emph in rows:
-            shown = f"\\emph{{{label}}}" if emph else label
-            t = load_trace_means(trace_dir, state, algo)
-            if t is None:
-                out.append(f" & {shown} & N/A & N/A & N/A \\\\")
-                missing += 1
-                continue
-            out.append(f" & {shown} & {t['ub']:.5f} & {t['lb']:.5f} & {t['b']:.5f} \\\\")
-    out.append("\\bottomrule")
-    if missing:
-        print(f"WARNING: {missing} row(s) have no gap-closing trace; "
-              f"run scripts/exp_main.sh (it records the CP trajectories)", file=sys.stderr)
-    return "\n".join(out)
-
-
-def size_block(states, instances, rows, results_dir):
-    """Problem size and memory: variables, constraints, nonzeros, peak RSS."""
-    out, missing = [], 0
-    for state in states:
-        disp = escape(display_name(instances[state][0]))
-        out.append("\\midrule")
-        out.append(f"\\multirow{{{len(rows)}}}{{*}}{{{disp}}}")
-        for algo, label, emph in rows:
-            shown = f"\\emph{{{label}}}" if emph else label
-            r = load_result(results_dir, state, algo)
-            if r is None or r.get("relax_nvars") in (None, 0):
-                out.append(f" & {shown} & N/A & N/A & N/A & N/A \\\\")
-                missing += 1
-                continue
-            rss = "N/A" if r["peak_rss_mib"] is None else f"{r['peak_rss_mib']:.0f}"
-            out.append(f" & {shown} & {r['relax_nvars']} & {r['relax_ncons']} & "
-                       f"{r['relax_nnz']} & {rss} \\\\")
-    out.append("\\bottomrule")
-    if missing:
-        print(f"WARNING: {missing} row(s) have no size diagnostics; those results "
-              f"predate the instrumentation -- re-run with --force", file=sys.stderr)
-    return "\n".join(out)
-
-
-def mem_block(states, instances, rows, results_dir):
-    """Per-level memory. Phases nest: total contains cp, which contains lmo."""
-    out, missing = [], 0
-    g = lambda r, k: "-" if r.get(k) is None else f"{r[k]:.2f}"
-    for state in states:
-        disp = escape(display_name(instances[state][0]))
-        out.append("\\midrule")
-        out.append(f"\\multirow{{{len(rows)}}}{{*}}{{{disp}}}")
-        for algo, label, emph in rows:
-            shown = f"\\emph{{{label}}}" if emph else label
-            r = load_result(results_dir, state, algo)
-            if r is None or r.get("mem_total_alloc_gib") is None:
-                out.append(f" & {shown} & N/A & N/A & N/A & N/A & N/A \\\\")
-                missing += 1
-                continue
-            calls = "-" if r.get("mem_lmo_calls") in (None, 0) else str(r["mem_lmo_calls"])
-            rss = "-" if r.get("mem_total_peak_rss_mib") is None else f"{r['mem_total_peak_rss_mib']:.0f}"
-            out.append(f" & {shown} & {g(r,'mem_total_alloc_gib')} & {g(r,'mem_cp_alloc_gib')} & "
-                       f"{g(r,'mem_lmo_alloc_gib')} ({calls}) & {g(r,'mem_ladmm_alloc_gib')} & {rss} \\\\")
-    out.append("\\bottomrule")
-    if missing:
-        print(f"WARNING: {missing} row(s) have no memory diagnostics; those results "
-              f"predate the instrumentation -- re-run with --force", file=sys.stderr)
-    return "\n".join(out)
-
-
-def build(table, args, instances):
-    spec = TABLES[table]
-    # sorted by display name for determinism; the paper's blocks are in an
-    # arbitrary historical order, so compare by state name, not by position.
-    states = sorted((s for s, (_, m) in instances.items() if m == spec["m"]),
-                    key=lambda s: display_name(instances[s][0]))
-    if not states:
+def build(name, ctx):
+    """Dispatch one table to the module that owns it."""
+    mod, spec = tables.REGISTRY[name]
+    if not ctx.states(spec["m"]):
         print(f"WARNING: no instances with N = {spec['m']}", file=sys.stderr)
-    if spec["kind"] == "gapclosing":
-        return gapclosing_block(states, instances, spec["rows"], args.trace_dir)
-    if spec["kind"] == "mem":
-        return mem_block(states, instances, spec["rows"], args.results_dir)
-    if spec["kind"] == "size":
-        return size_block(states, instances, spec["rows"], args.results_dir)
-    return main_block(states, instances, spec["rows"], args.results_dir)
+    return mod.build(name, spec, ctx)
+
+
+def emit_manifest(wanted, ctx):
+    print("# Raw result files behind each table.")
+    print("# Regenerate a table with: python3 scripts/make_tables.py --table <name>")
+    missing_total = 0
+    for name in wanted:
+        mod, spec = tables.REGISTRY[name]
+        PROVENANCE.clear()
+        build(name, ctx)                       # populates PROVENANCE as a side effect
+        cells = [(s, a) for s in ctx.states(spec["m"]) for a, _, _ in spec["rows"]]
+        found = dict(PROVENANCE)
+        missing = [c for c in cells
+                   if c not in found and (c[0], c[1] + " [trace]") not in found]
+        missing_total += len(missing)
+        print(f"\n## table {name}  ({len(cells) - len(missing)}/{len(cells)} cells)"
+              f"  [{mod.__name__.split('.')[-1]}, from {spec['experiment']}]")
+        for (state, algo), path in sorted(found.items()):
+            print(f"  {ctx.name(state):<12} {algo:<14} {path}")
+        for state, algo in missing:
+            print(f"  {ctx.name(state):<12} {algo:<14} MISSING -> run scripts/{spec['experiment']}")
+    if missing_total:
+        print(f"\n# {missing_total} cell(s) have no raw file; "
+              f"run the experiment named beside each one", file=sys.stderr)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--table", default="all", choices=list(TABLES) + ["all"])
+    ap.add_argument("--table", default="all", choices=sorted(tables.REGISTRY) + ["all"])
     ap.add_argument("--benchmark-dir", default=os.path.join(ROOT, "benchmark"))
     ap.add_argument("--results-dir", action="append",
                     help="raw-result directory; repeatable, searched in order "
                          f"(default: {', '.join(os.path.relpath(d, ROOT) for d in RESULT_DIRS)})")
     ap.add_argument("--trace-dir", action="append", help="trajectory directory; repeatable")
+    ap.add_argument("--out", help="directory to write <table>.tex into (default: stdout)")
     ap.add_argument("--manifest", action="store_true",
                     help="list the raw file behind every cell instead of emitting LaTeX")
-    ap.add_argument("--out", help="directory to write <table>.tex into (default: stdout)")
+    ap.add_argument("--list", action="store_true",
+                    help="list the tables, their module and the experiment that fills them")
     args = ap.parse_args()
-    args.results_dir = args.results_dir or RESULT_DIRS
-    args.trace_dir = args.trace_dir or TRACE_DIRS
+
+    if args.list:
+        print(f"{'table':<8}{'module':<13}{'experiment':<26}subsystems")
+        for name in sorted(tables.REGISTRY):
+            mod, spec = tables.REGISTRY[name]
+            print(f"{name:<8}{mod.__name__.split('.')[-1]:<13}"
+                  f"{spec['experiment']:<26}m = {spec['m']}")
+        return
 
     instances = load_instances(args.benchmark_dir)
     if not instances:
         sys.exit(f"no benchmark instances found in {args.benchmark_dir}")
+    ctx = Context(instances, args.results_dir or RESULT_DIRS, args.trace_dir or TRACE_DIRS)
 
-    wanted = list(TABLES) if args.table == "all" else [args.table]
+    wanted = sorted(tables.REGISTRY) if args.table == "all" else [args.table]
 
     if args.manifest:
-        print("# Raw result files behind each table.")
-        print("# Regenerate a table with: python3 scripts/make_tables.py --table <name>")
-        missing_total = 0
-        for t in wanted:
-            PROVENANCE.clear()
-            build(t, args, instances)            # populates PROVENANCE as a side effect
-            spec = TABLES[t]
-            states = sorted((x for x, (_, mm) in instances.items() if mm == spec["m"]),
-                            key=lambda x: display_name(instances[x][0]))
-            wanted_cells = [(x, a) for x in states for a, _, _ in spec["rows"]]
-            found = {k: v for k, v in PROVENANCE.items()}
-            missing = [c for c in wanted_cells
-                       if c not in found and (c[0], c[1] + " [trace]") not in found]
-            missing_total += len(missing)
-            print(f"\n## table {t}  ({len(wanted_cells) - len(missing)}/{len(wanted_cells)} cells)")
-            for (state, algo), path in sorted(found.items()):
-                print(f"  {display_name(instances[state][0]):<12} {algo:<14} {path}")
-            for state, algo in missing:
-                print(f"  {display_name(instances[state][0]):<12} {algo:<14} MISSING")
-        if missing_total:
-            print(f"\n# {missing_total} cell(s) have no raw file; "
-                  f"run the matching experiment in scripts/", file=sys.stderr)
+        emit_manifest(wanted, ctx)
         return
 
-    for t in wanted:
-        body = build(t, args, instances)
+    for name in wanted:
+        body = build(name, ctx)
         if args.out:
             os.makedirs(args.out, exist_ok=True)
-            path = os.path.join(args.out, f"{t}.tex")
+            path = os.path.join(args.out, f"{name}.tex")
             open(path, "w").write(body + "\n")
             print(f"wrote {path}")
         else:
-            print(f"% ---------- table {t} ----------")
+            print(f"% ---------- table {name} ----------")
             print(body)
             print()
 

@@ -180,8 +180,25 @@ profiles all derive from it rather than needing their own runs.
 | `make_tables.py --table mem3\|mem4\|mem5` | per-level memory |
 | `make_tables.py --table size3\|size4\|size5` | relaxation size and file size |
 | `make_tables.py --manifest` | **the raw file behind every table cell** |
+| `make_tables.py --list` | which module and experiment each table comes from |
 | `performance_profile.py` | performance profiles (Dolan–Moré) |
 | `summarize_traces.py` | convergence trajectories |
+
+`make_tables.py` is a dispatcher; each table family lives in its own module,
+mirroring the experiment split:
+
+| module | tables | filled by |
+|---|---|---|
+| `tables/main.py` | `m3` `m4` `m5` | `exp_main.sh` |
+| `tables/lowrank.py` | `m5low` | `exp_lowrank.sh` |
+| `tables/gapclosing.py` | `m5cp` | `exp_main.sh` (trajectories) |
+| `tables/ddps.py` | `ddps3` `ddps4` `ddps5` | `exp_ddps_ablation.sh` + `exp_main.sh` |
+| `tables/memory.py` | `mem3` `mem4` `mem5` | `exp_main.sh` |
+| `tables/size.py` | `size3` `size4` `size5` | `exp_main.sh`, `exp_ddps_ablation.sh` |
+| `tables/common.py` | — | loading, formatting, provenance |
+
+Adding a table means adding a module with a `TABLES` dict and a `build()`;
+the dispatcher picks it up from `tables/__init__.py`.
 
 ```bash
 python3 scripts/make_tables.py --table all --out tables/

@@ -25,8 +25,8 @@ No matplotlib dependency: --out writes .dat files for \\addplot table.
 import argparse, math, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from make_tables import (ROOT, RESULT_DIRS, MAIN_ROWS, load_instances,
-                         load_result, display_name)
+from tables.common import ROOT, RESULT_DIRS, load_instances, load_result, display_name
+from tables.main import ROWS as MAIN_ROWS
 
 # metric -> (field extractor, larger_is_better)
 METRICS = {
