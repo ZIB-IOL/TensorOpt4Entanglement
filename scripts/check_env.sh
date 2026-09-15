@@ -104,66 +104,6 @@ else
     esac
 fi
 
-echo "== mosek library =="
-if [[ -n "${MOSEKBINDIR:-}" ]]; then
-    lib=$(ls "$MOSEKBINDIR"/libmosek64.so* 2>/dev/null | head -1)
-    if [[ -z "$lib" ]]; then
-        fail "MOSEKBINDIR set but has no libmosek64.so*: $MOSEKBINDIR"
-    else
-        pass "MOSEKBINDIR: $MOSEKBINDIR"
-        # Mosek.jl's build reads the version by running this, not by reading
-        # the libraries; without it the build rejects the directory outright.
-        [[ -x "$MOSEKBINDIR/mosek" ]] \
-            || fail "no runnable 'mosek' in MOSEKBINDIR; Mosek.jl's build probes the version
-        by running it, and rejects the directory when it cannot"
-        # The file existing is not enough: dlopen also has to resolve the
-        # libraries it links against. MOSEK ships several of them (libtbb and
-        # friends) in this same directory, and a site install often carries no
-        # RPATH, so they are found only via LD_LIBRARY_PATH.
-        if command -v ldd >/dev/null 2>&1; then
-            missing=$(ldd "$lib" 2>/dev/null | awk '/not found/{print $1}' | sort -u)
-            if [[ -n "$missing" ]]; then
-                fail "$(basename "$lib") cannot be loaded; unresolved: $(echo $missing)"
-                sibling=0
-                for m in $missing; do [[ -e "$MOSEKBINDIR/$m" ]] && sibling=1; done
-                if [[ $sibling -eq 1 ]]; then
-                    printf "        they sit next to it in MOSEKBINDIR, so add it to the loader path:\n"
-                    printf "          export LD_LIBRARY_PATH=\"%s:\$LD_LIBRARY_PATH\"\n" "$MOSEKBINDIR"
-                    printf "        (runjobs.sh does this for you; this shell does not)\n"
-                else
-                    printf "        not in MOSEKBINDIR either - load the site module that provides them\n"
-                fi
-            else
-                pass "libmosek64 resolves all of its shared libraries"
-            fi
-        fi
-        # Resolving every dependency is still not enough: a library marked
-        # PT_GNU_STACK=RWE is refused outright by recent glibc/kernels, with
-        # an error that names the file rather than the reason.
-        if command -v python3 >/dev/null 2>&1; then
-            if ! python3 scripts/fix_execstack.py --src "$MOSEKBINDIR" --check >/dev/null 2>&1; then
-                marked=$(python3 scripts/fix_execstack.py --src "$MOSEKBINDIR" --check 2>/dev/null \
-                         | awk '/EXECSTACK/{print $2}')
-                if [[ -n "$marked" ]]; then
-                    fail "asks for an executable stack, which dlopen will refuse: $(echo $marked)"
-                    printf "        (\"cannot enable executable stack ...: Invalid argument\")\n"
-                    printf "        patch a writable copy and rebuild against it:\n"
-                    printf "          python3 scripts/fix_execstack.py\n"
-                else
-                    pass "no library asks for an executable stack"
-                fi
-            else
-                pass "no library asks for an executable stack"
-            fi
-        fi
-    fi
-else
-    note "MOSEKBINDIR unset - Mosek.jl will use whatever its last build resolved"
-fi
-if [[ -n "${MOSEKHOME:-}" && ! -d "${MOSEKHOME:-}" ]]; then
-    note "MOSEKHOME points at a missing directory: $MOSEKHOME (Mosek.jl ignores it anyway; it reads MOSEKBINDIR)"
-fi
-
 echo "== a real solve =="
 if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
     # `using` must be a top-level statement of its own: a macro like @variable
@@ -187,15 +127,10 @@ if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
         SOLVE_FAIL*)
             msg="${out#SOLVE_FAIL: }"
             fail "$msg"
-            if [[ "$msg" == *"executable stack"* ]]; then
-                printf "        run: python3 scripts/fix_execstack.py\n"
-            elif [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
-                printf "        if the path it names still exists, the library is there but\n"
-                printf "        cannot be dlopen'd - see the unresolved libraries reported above.\n"
-                printf "        if the path is gone, rebuild against one that is not:\n"
-                printf "          export MOSEKBINDIR=/path/to/mosek/10.2/tools/platform/linux64x86/bin\n"
+            if [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
+                printf "        Mosek.jl cannot load the solver it built against. Re-fetch it:\n"
                 printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"); Pkg.precompile()'\n"
-                printf "        (omit MOSEKBINDIR to let Mosek.jl download its own copy, needs internet)\n"
+                printf "        (this downloads MOSEK, so the machine needs outbound internet)\n"
             fi ;;
         SOLVE_WRONG) fail "Mosek ran but returned the wrong answer" ;;
         *)          fail "could not test the solver: $out" ;;

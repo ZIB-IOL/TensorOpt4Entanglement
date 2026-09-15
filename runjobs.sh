@@ -30,7 +30,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 #
 # Everything the runs need is set here and nowhere else. An explicit value
 # from the environment always wins, so you can override one without editing:
-#     MOSEKBINDIR=/other/path bash runjobs.sh
+#     JULIA_BIN=/path/to/julia bash runjobs.sh
+#
+# There is no MOSEK path to set: Mosek.jl downloads and manages its own MOSEK,
+# so a licence is all it needs from us.
 #
 # Check that they resolve on this machine with:  bash runjobs.sh --env
 # ---------------------------------------------------------------------------
@@ -40,30 +43,9 @@ export LC_ALL=C
 # Julia executable. On a cluster this is usually just "julia" from the module.
 export JULIA_BIN="${JULIA_BIN:-julia}"
 
-# MOSEK solver library. Mosek.jl reads MOSEKBINDIR at BUILD time and bakes the
-# path into deps.jl, so it must point at the bin directory of a MOSEK whose
-# major.minor matches the Mosek.jl version (10.2 for this project's Manifest).
-MOSEKBINDIR_DEFAULT="/software/mosek/10.2/tools/platform/linux64x86/bin"
-# an explicit value always wins; the default only applies where it exists,
-# since pointing Mosek.jl at a missing directory is worse than saying nothing.
-# ./.mosek_bin, if scripts/fix_execstack.py made one, wins over the site copy:
-# it is the same libraries with a marking the loader refuses cleared.
-if [[ -n "${MOSEKBINDIR:-}" ]];          then export MOSEKBINDIR
-elif [[ -d "$PWD/.mosek_bin" ]];         then export MOSEKBINDIR="$PWD/.mosek_bin"
-elif [[ -d "$MOSEKBINDIR_DEFAULT" ]];    then export MOSEKBINDIR="$MOSEKBINDIR_DEFAULT"
-fi
-# libmosek64 links libtbb and friends, which MOSEK ships in this same directory.
-# A site install usually carries no RPATH, so dlopen finds them only here --
-# without this the build succeeds and `using Mosek` then fails to load.
-if [[ -n "${MOSEKBINDIR:-}" ]]; then
-    case ":${LD_LIBRARY_PATH:-}:" in
-        *":$MOSEKBINDIR:"*) ;;
-        *) export LD_LIBRARY_PATH="$MOSEKBINDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
-    esac
-fi
-
 # MOSEK licence: a file path, or port@host for a floating licence server.
-# ~/mosek/mosek.lic wins over the default, so a laptop needs no edit here.
+# This is the only thing MOSEK needs from us -- Mosek.jl fetches the solver
+# itself. ~/mosek/mosek.lic wins over the default, so a laptop needs no edit.
 MOSEKLM_LICENSE_FILE_DEFAULT="27007@solice01.zib.de"
 if [[ -n "${MOSEKLM_LICENSE_FILE:-}" ]];  then export MOSEKLM_LICENSE_FILE
 elif [[ ! -f "$HOME/mosek/mosek.lic" ]];  then export MOSEKLM_LICENSE_FILE="$MOSEKLM_LICENSE_FILE_DEFAULT"
@@ -80,12 +62,6 @@ case "$JULIA_DEPOT_PATH" in
     /*|*:*) export JULIA_DEPOT_PATH ;;                 # already absolute
     *)    export JULIA_DEPOT_PATH="$PWD/$JULIA_DEPOT_PATH" ;;
 esac
-
-# Kept for site scripts that read it; Mosek.jl itself does not.
-MOSEKHOME_DEFAULT="/software/mosek/10.2"
-if [[ -n "${MOSEKHOME:-}" ]];        then export MOSEKHOME
-elif [[ -d "$MOSEKHOME_DEFAULT" ]];  then export MOSEKHOME="$MOSEKHOME_DEFAULT"
-fi
 
 # ---------------------------------------------------------------------------
 

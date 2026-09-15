@@ -3,121 +3,35 @@
 Short instructions to install the Julia packages this project uses and to reproduce the paper's experiments, locally or on a Slurm cluster.
 
 ## Prerequisites
-- Linux machine with Julia 1.11.x (tested with 1.11.6) and Mosek.
+- Linux machine with Julia 1.11.x (tested with 1.11.6).
+- A MOSEK licence. The solver itself is fetched by Mosek.jl (MOSEK 11.2).
 - A working Slurm cluster.
 
-> **Julia version matters.** Use 1.11.x. The benchmark loader is fine on 1.12+,
-> but `Manifest.toml` is resolved for `julia_version = "1.11.4"`; instantiating
-> it under 1.12 re-resolves the whole graph, so you no longer get the package
-> versions the paper's numbers were produced with.
->
-> Check what you have with `julia --version`. If it is not 1.11.x, get one —
-> with [juliaup](https://github.com/JuliaLang/juliaup) if you have it:
-> ```bash
-> juliaup add 1.11.6
-> julia +1.11.6 --project=. -e 'using Pkg; Pkg.instantiate()'
-> ```
-> The `+1.11.6` selector is a **juliaup** feature. A plain `julia` binary — what
-> a cluster module usually gives you — treats it as a filename and fails with
-> `SystemError: opening file ".../+1.11.6"`. Without juliaup, unpack an official
-> tarball anywhere you can write (no root needed) and point `JULIA_BIN` at it:
-> ```bash
-> curl -fLO https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.6-linux-x86_64.tar.gz
-> tar xzf julia-1.11.6-linux-x86_64.tar.gz
-> export JULIA_BIN="$PWD/julia-1.11.6/bin/julia"
-> "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.instantiate()'
-> ```
-> `JULIA_BIN` is the setting every script uses, so exporting it (or editing it
-> in the Site settings block of `runjobs.sh`) is all that is needed —
-> `bash runjobs.sh --env` confirms which Julia the jobs will get.
+### Setup
 
-> **Optional: a project-local Julia depot.** Create `.julia_depot/` in the repo
-> and `runjobs.sh` will use it instead of `~/.julia`:
-> ```bash
-> mkdir .julia_depot
-> julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-> ```
-> This isolates the run from a shared `~/.julia` that may have drifted from
-> `Manifest.toml`, and keeps the packages on the same filesystem as the repo —
-> useful when `$HOME` has a quota. The first run installs everything into it
-> (a few GB), so expect one slow start. The path is always made absolute;
-> a *relative* `JULIA_DEPOT_PATH` resolves against each job's working
-> directory, which is why the earlier `.julia_depot` default was removed.
-> `scripts/check_env.sh` reports which depot is actually in use.
+```bash
+# 1. Julia 1.11.x -- the Manifest is resolved for it
+juliaup add 1.11.6 && export JULIA_BIN='julia +1.11.6'
+# no juliaup? unpack an official tarball and set JULIA_BIN to its bin/julia
 
-> **Mosek.jl must be able to find the solver library.** Its build reads
-> `MOSEKBINDIR` (not `MOSEKHOME`) and bakes the resolved path into `deps.jl`,
-> so if that path later disappears every run fails with
-> `Unable to load libmosek ... Please re-run Pkg.build`. Point it at a site
-> install and rebuild:
-> ```bash
-> export MOSEKBINDIR=/path/to/mosek/10.2/tools/platform/linux64x86/bin
-> julia --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
-> ```
-> Omit `MOSEKBINDIR` to let Mosek.jl download its own copy (needs internet).
->
-> A *successful* build followed by `Unable to load libmosek (<path that exists>)`
-> is a different fault: the file is there but `dlopen` cannot resolve the
-> libraries it links against. MOSEK ships those beside it, and site installs
-> often carry no `RPATH`, so they are found only via the loader path:
-> ```bash
-> export LD_LIBRARY_PATH="$MOSEKBINDIR:$LD_LIBRARY_PATH"
-> ```
-> `runjobs.sh` does this automatically whenever `MOSEKBINDIR` is set, so Slurm
-> jobs get it too. `bash runjobs.sh --env` runs `ldd` and names any library
-> that is still unresolved.
+# 2. MOSEK licence -- the solver itself is fetched by Mosek.jl
+export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic     # or port@host, or ~/mosek/mosek.lic
 
-> **`cannot enable executable stack as shared object requires: Invalid argument`.**
-> MOSEK ships `libmosek64.so` marked `PT_GNU_STACK = RWE`, and recent glibc and
-> kernels refuse to grant an executable stack at `dlopen` time. Nothing about
-> your setup is wrong — the same install stops working when the site's glibc is
-> updated. The marking is a build artifact, not a real requirement, so clearing
-> it is the standard remedy. A site install is read-only, so patch a copy:
-> ```bash
-> python3 scripts/fix_execstack.py --find    # which MOSEK here fits Mosek.jl
-> python3 scripts/fix_execstack.py --check   # what is marked
-> python3 scripts/fix_execstack.py           # patch a copy into ./.mosek_bin
-> export MOSEKBINDIR="$PWD/.mosek_bin"
-> "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
-> ```
-> `runjobs.sh` prefers `./.mosek_bin` over the site path whenever it exists, so
-> the export above is only needed for the rebuild; the jobs find it by
-> themselves. Delete the directory to go back to the site copy.
-> The rebuild is required: `deps.jl` bakes in the path, so it must point at the
-> patched copy. `scripts/fix_execstack.py` edits the ELF program header
-> directly and needs neither `patchelf` nor `execstack`. It mirrors the whole
-> bin directory, not only `lib*.so*`: Mosek.jl's build determines the version by
-> *running* `<bindir>/mosek` and parsing its banner, and rejects a directory
-> where that is missing with `does not point to a MOSEK 10.2 bin directory`.
->
-> **Letting Mosek.jl download its own copy does not avoid this.** Its build
-> derives the MOSEK major.minor from its own package version, so Mosek.jl 10.2
-> fetches MOSEK 10.2 and nothing else — and the newest 10.2 patch, 10.2.19,
-> carries the same marking. Measured on a downloaded copy of each:
->
-> | MOSEK | `PT_GNU_STACK` |
-> | --- | --- |
-> | 10.2.19 (latest 10.2, from download.mosek.com) | `RWE` — affected |
-> | 11.2 | `RW` — fixed upstream |
->
-> Escaping the patch therefore means moving the solver to 11.x, which is a
-> `Mosek`/`MosekTools` upgrade in `Project.toml` plus a re-resolve — a
-> different solver from the one the paper's tables were produced with, so every
-> number would have to be regenerated. Patching 10.2 keeps that comparison
-> intact. Neither the version nor the path is hardcoded in the script: it reads
-> the required version from `Manifest.toml` and searches for a matching
-> install, so bumping Mosek.jl makes it follow.
+# 3. packages
+mkdir .julia_depot                                  # optional: keep them in the repo
+"$JULIA_BIN" --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
-> **Mosek needs a licence file.** The Julia package installs without one, but
-> every solver call then fails with `License cannot be located`. Put your
-> licence at `~/mosek/mosek.lic`, or point at it explicitly:
-> ```bash
-> export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic
-> ```
-> Check it works with:
-> ```bash
-> julia --project=. -e 'using JuMP, MosekTools; m=Model(Mosek.Optimizer); set_silent(m); @variable(m,x>=1.5); @objective(m,Min,x); optimize!(m); println(termination_status(m))'
-> ```
+# 4. check
+bash runjobs.sh --env
+```
+
+Notes:
+- On 1.12+ the Manifest re-resolves to different package versions, so stay on 1.11.x.
+- `+1.11.6` needs juliaup; a plain `julia` reads it as a filename.
+- `.julia_depot/` is used only if it exists; the first install takes a few GB.
+- Mosek.jl downloads MOSEK 11.2 itself, so no solver path to configure — but
+  the machine that installs needs outbound internet.
+
 - Project directory layout:
     - `src/` — the `ExactEntanglement` package
     - `scripts/run_experiment.jl` — command-line entry point
@@ -144,13 +58,6 @@ Naming: `lowerCamelCase` for functions, `UpperCamelCase` for types. The
 `snake_case` methods (`manifold_dimension`, `retract_project!`, ...) are
 interface methods whose names are fixed by ManifoldsBase/Manopt.
 
-## Install required Julia packages
-From the project root (this repo), using a 1.11.x Julia (see above):
-```bash
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-```
-This will install packages listed in `Project.toml`/`Manifest.toml` if they exist.
-
 ## Running the experiments
 
 Everything goes through `runjobs.sh`; see
@@ -167,28 +74,18 @@ bash runjobs.sh              # submit to Slurm
 
 ### Site settings
 
-`runjobs.sh` opens with a **Site settings** block — a handful of plain
-assignments you edit once for your machine. It is the only place the runs take
-their environment from, and every mode (`--local`, `--dry-run`, `--check`,
-Slurm) gets the same one:
+`runjobs.sh` opens with a **Site settings** block — three plain assignments you
+edit once for your machine, and the only place the runs take their environment
+from:
 
 | setting | what it is | shipped default |
 | --- | --- | --- |
 | `JULIA_BIN` | Julia executable | `julia` |
-| `MOSEKBINDIR` | directory holding `libmosek64.so` | `./.mosek_bin` if present, else site MOSEK 10.2 |
 | `MOSEKLM_LICENSE_FILE` | licence file or `port@host` | ZIB licence server |
 | `JULIA_DEPOT_PATH` | package depot | `./.julia_depot` when that directory exists |
-| `MOSEKHOME` | for site scripts only; Mosek.jl ignores it | `/software/mosek/10.2` |
 
-`MOSEKBINDIR` is also prepended to `LD_LIBRARY_PATH`, so `libmosek64.so` can
-find the libraries it ships with.
-
-A value already in the environment always wins, so a one-off override needs no
-edit: `MOSEKBINDIR=/other/path bash runjobs.sh`. The two path defaults apply
-only where they exist, so the file works unedited on a laptop with a local
-Mosek build. `bash runjobs.sh --env` runs `scripts/check_env.sh` against the
-settings these produce, which is what the jobs will actually see —
-`scripts/check_env.sh` on its own only inspects your current shell.
+A value already in the environment wins, so a one-off override needs no edit.
+`bash runjobs.sh --env` checks the settings the jobs will actually get.
 
 `scripts/check_env.sh` checks Julia's version, the project layout, writable
 output directories, disk space, the Mosek licence — by solving a test LP, not

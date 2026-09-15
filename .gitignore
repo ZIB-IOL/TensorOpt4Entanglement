@@ -6,5 +6,3 @@ results/*/traces/
 results/*/logs/
 joblists/
 
-# patched copy of the site MOSEK libraries (scripts/fix_execstack.py)
-.mosek_bin/
