@@ -12,6 +12,7 @@
 # Usage: see scripts/table_m5.sh
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+parse_args "$@"
 run_table "m5_gapclosing" 5 D LDL
 missing=0
 while read -r s; do

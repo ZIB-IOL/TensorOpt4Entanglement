@@ -67,7 +67,7 @@ def load_result(results_dir, state, algo):
 
 def load_trace_means(trace_dir, state, algo):
     """Mean ub_relx / lb_relx / b_lower over the gap-closing CP iterations."""
-    path = os.path.join(trace_dir, f"{state}_{algo}.csv")
+    path = os.path.join(trace_dir, f"{state}_{algo}.cp.csv")
     if not os.path.isfile(path):
         return None
     ub, lb, b = [], [], []

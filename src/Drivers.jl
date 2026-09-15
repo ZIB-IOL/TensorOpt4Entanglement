@@ -17,7 +17,11 @@ function loadBenchmark(filename::String)
     filepath = joinpath(dirname(@__FILE__), "../benchmark", filename)
     isfile(filepath) || error("File not found: $filepath")
 
+    # Benchmark files declare `using Ket` themselves but were written to be
+    # included into this module, so they also rely on LinearAlgebra/Random
+    # being ambiently available (e.g. `norm`). Reproduce that environment.
     sandbox = Module(:BenchmarkInstance)
+    Base.eval(sandbox, :(using LinearAlgebra, Random))
     Base.include(sandbox, filepath)
     get(sym) = Base.invokelatest(getfield, sandbox, sym)
 

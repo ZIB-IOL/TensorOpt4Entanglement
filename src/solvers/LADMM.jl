@@ -229,6 +229,7 @@ function ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, m
     maxiter = is_high_accuracy ? 100000000 : maxiter
     cur_pen = 0.0
     indexmap = buildIndexMap(dims)
+    trace = ladmmTraceSink()
 
     maxmanoptiter = min( is_escaping ? param.heur_MANOPT1_maxiter : param.heur_MANOPT_maxiter, dimH * dimH *2 +1)
     maxmanoptiter *= is_high_accuracy ? 2 : 1
@@ -279,6 +280,9 @@ function ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, m
         )
         cur_pen = sqrt(pen)
         norm_vgl = norm(grad_l_closure(M, pX))
+        # residual is ||A(z) + a - Psi(x)||_2: ub_heur is a valid bound only
+        # once this vanishes, so its trajectory is what the paper discusses
+        traceRow!(trace, i, zeta, f, pen, cur_pen, norm_vgl, z, f + L + zeta * pen)
 
         if cur_pen > norm_vgl * tau
             zeta = min(zeta / zetascale, zeta_max)
@@ -316,6 +320,7 @@ function ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, m
         end
     end
 
+    traceClose!(trace)
     trc = fastTrace(M, pX)
     pX /= trc^(1/(2*M.nsubs))
     purestates_, substates_, weights_ = unpackFactors(pX, nrank1, sumdim, dims, cdims, nsubs)

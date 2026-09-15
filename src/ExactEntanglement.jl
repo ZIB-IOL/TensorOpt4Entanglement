@@ -62,6 +62,7 @@ include("Types.jl")        # Status, Param, run clock
 include("MathUtils.jl")    # index maps, McCormick helpers, small numerics
 include("Solver.jl")       # Mosek setup and result classification
 include("Lift.jl")         # the smooth lift Psi and its gradient
+include("Trace.jl")        # optional per-iteration trajectory recording
 
 # ---- sBB linear-minimisation oracle -------------------------------------
 include("sbb/Tree.jl")          # bipartition tree

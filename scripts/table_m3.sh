@@ -12,4 +12,5 @@
 #   USE_SLURM=1 bash scripts/table_m3.sh  # emit a job list for run.slurm
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+parse_args "$@"
 run_table "m3" 3 A LD1 D LDL PPT RLT

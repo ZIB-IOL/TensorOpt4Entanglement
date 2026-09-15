@@ -18,6 +18,45 @@ DRY_RUN="${DRY_RUN:-0}"     # 1 = print the jobs, run nothing
 FORCE="${FORCE:-0}"         # 1 = re-run even if a result file exists
 USE_SLURM="${USE_SLURM:-0}" # 1 = emit a job list for run.slurm instead of running
 
+# --- argument parsing -----------------------------------------------------
+# Every table script accepts the same flags; the environment variables above
+# remain available and the flags simply override them.
+usage() {
+    cat <<USAGE
+Usage: $(basename "$0") [options]
+
+  -f, --force            re-run every job, even if a result file exists
+  -n, --dry-run          list the jobs that would run, run nothing
+  -t, --time-limit SEC   per-job time limit (-1 = the paper's limit for this m)
+      --slurm            write a job list for run.slurm instead of running
+      --results-dir DIR  where result files go        (default results/)
+      --trace-dir DIR    where trajectory CSVs go     (default results/traces/)
+      --log-dir DIR      where per-job logs go        (default results/logs/)
+      --julia CMD        julia command to use         (default: julia +1.11.6)
+  -h, --help             this message
+
+Equivalent environment variables: FORCE, DRY_RUN, TIME_LIMIT, USE_SLURM,
+RESULTS_DIR, TRACE_DIR, LOG_DIR, JULIA_BIN.
+USAGE
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--force)       FORCE=1; shift ;;
+            -n|--dry-run)     DRY_RUN=1; shift ;;
+            -t|--time-limit)  TIME_LIMIT="$2"; shift 2 ;;
+            --slurm)          USE_SLURM=1; shift ;;
+            --results-dir)    RESULTS_DIR="$2"; shift 2 ;;
+            --trace-dir)      TRACE_DIR="$2"; shift 2 ;;
+            --log-dir)        LOG_DIR="$2"; shift 2 ;;
+            --julia)          JULIA_BIN="$2"; shift 2 ;;
+            -h|--help)        usage; exit 0 ;;
+            *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+        esac
+    done
+}
+
 # --- julia ----------------------------------------------------------------
 pick_julia() {
     if [[ -n "${JULIA_BIN:-}" ]]; then echo "$JULIA_BIN"; return; fi
@@ -27,9 +66,10 @@ pick_julia() {
     fi
     echo "julia"
 }
-JULIA="$(pick_julia)"
+
 
 check_env() {
+    JULIA="$(pick_julia)"
     if ! command -v ${JULIA%% *} >/dev/null 2>&1; then
         echo "ERROR: julia not found on PATH (set JULIA_BIN)." >&2; exit 1
     fi
@@ -73,8 +113,8 @@ run_job() {
         echo "  would run: $JULIA --project=. scripts/run_experiment.jl -s $state -a $algo -t $TIME_LIMIT"
         return 0
     fi
-    local trace="$TRACE_DIR/${state}_${algo}.csv"
-    rm -f "$trace"
+    local trace="$TRACE_DIR/${state}_${algo}"
+    rm -f "$trace".*.csv
     echo "  run    $state $algo"
     local start; start=$(date +%s)
     ( cd "$REPO_ROOT" && EXACTENT_TRACE="$trace" EXACTENT_RESULTS_DIR="$RESULTS_DIR" \

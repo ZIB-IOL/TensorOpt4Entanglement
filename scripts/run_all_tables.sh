@@ -11,18 +11,38 @@
 # USE_SLURM=1 on a cluster, or TIME_LIMIT=<seconds> for a quick smoke test.
 #
 # Usage:
-#   bash scripts/run_all_tables.sh                  # everything, sequentially
-#   bash scripts/run_all_tables.sh m3 m5            # only these tables
-#   DRY_RUN=1 bash scripts/run_all_tables.sh        # list all jobs
-#   TIME_LIMIT=60 bash scripts/run_all_tables.sh m3 # fast smoke test
-#   USE_SLURM=1 bash scripts/run_all_tables.sh      # emit job lists
+#   bash scripts/run_all_tables.sh                     # everything, sequentially
+#   bash scripts/run_all_tables.sh m3 m5               # only these tables
+#   bash scripts/run_all_tables.sh --dry-run           # list all jobs
+#   bash scripts/run_all_tables.sh --force             # redo every experiment
+#   bash scripts/run_all_tables.sh m3 -t 60            # fast smoke test
+#   bash scripts/run_all_tables.sh --slurm             # emit job lists
 #
 # Finished jobs are skipped, so an interrupted run can simply be restarted.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ALL_TABLES=(m3 m4 m5 m5_lowrank m5_gapclosing)
-TABLES=("$@"); [[ ${#TABLES[@]} -eq 0 ]] && TABLES=("${ALL_TABLES[@]}")
+
+# split bare table names from flags; flags are forwarded to every table script
+TABLES=(); FLAGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "Usage: $(basename "$0") [tables...] [options]"
+            echo "  tables: ${ALL_TABLES[*]}   (default: all)"
+            echo "  options are forwarded to each table script:"
+            bash "$HERE/table_m3.sh" --help | sed -n '3,$p'
+            exit 0 ;;
+        -*) FLAGS+=("$1")
+            # these flags take a value
+            case "$1" in -t|--time-limit|--results-dir|--trace-dir|--log-dir|--julia)
+                FLAGS+=("$2"); shift ;; esac
+            shift ;;
+        *)  TABLES+=("$1"); shift ;;
+    esac
+done
+[[ ${#TABLES[@]} -eq 0 ]] && TABLES=("${ALL_TABLES[@]}")
 
 started=$(date +%s)
 declare -a failed=()
@@ -33,7 +53,7 @@ for t in "${TABLES[@]}"; do
         failed+=("$t"); continue
     fi
     echo; echo "### $t ###"
-    bash "$script" || failed+=("$t")
+    bash "$script" "${FLAGS[@]+"${FLAGS[@]}"}" || failed+=("$t")
 done
 
 echo

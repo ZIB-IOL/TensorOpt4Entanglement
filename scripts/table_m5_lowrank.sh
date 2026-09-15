@@ -7,4 +7,5 @@
 # Usage: see scripts/table_m5.sh
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+parse_args "$@"
 run_table "m5_lowrank" 5 LDR0 LDR1 LDR2 LDR3 LDR4 LDR5

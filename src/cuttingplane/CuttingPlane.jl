@@ -1,40 +1,3 @@
-# ---------------------------------------------------------------------------
-# Cutting-plane iteration trace.
-#
-# `results/` records only the final bounds of a run, but the gap-closing table
-# of the paper averages over the CP iterations that run after the algorithm
-# enters its last phase. Set EXACTENT_TRACE to a file path to record one CSV
-# row per CP iteration:
-#
-#     iter,is_last,ub_relx,lb_relx,b_lower,n_states
-#
-# `b_lower` is the sBB oracle's lower bound for that round, so that
-# lb_relx = ub_relx + b_lower.
-# ---------------------------------------------------------------------------
-
-"""
-    cpTraceSink() -> IO or nothing
-
-Open the CP trace file named by `ENV["EXACTENT_TRACE"]`, or return `nothing`
-when tracing is off. Repeated calls in one process append.
-"""
-function cpTraceSink()
-    path = get(ENV, "EXACTENT_TRACE", "")
-    isempty(path) && return nothing
-    isfile(path) || open(io -> println(io, "iter,is_last,ub_relx,lb_relx,b_lower,n_states"), path, "w")
-    return open(path, "a")
-end
-
-cpTraceRow!(::Nothing, args...) = nothing
-function cpTraceRow!(io::IO, iter, is_last, ub, lb, b, nstates)
-    println(io, iter, ",", is_last, ",", ub, ",", lb, ",", b, ",", nstates)
-    flush(io)
-    return nothing
-end
-
-cpTraceClose!(::Nothing) = nothing
-cpTraceClose!(io::IO) = close(io)
-
 """
     cuttingPlane(detector, separateproblem, param, effortlevel = 0, singlerun = false)
 
@@ -122,7 +85,7 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
                 nlmocall += 1
             end
             # b_lower is the LMO's own lower bound for this round; lb_relx = ub_relx + b_lower
-            cpTraceRow!(trace, iter, param.is_last, primalobj, dualobj, newdualobj - primalobj, length(detector.purestates))
+            traceRow!(trace, iter, param.is_last, primalobj, dualobj, newdualobj - primalobj, length(detector.purestates))
             if param.log_level > 0
                 print("iteration: $(iter),  #states: $(length(detector.purestates)), valueb: $(valueb), activeness: $(cutactiveness), primalobj: $(primalobj), dualobj: $(dualobj)\n")
             end
@@ -146,7 +109,7 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
             break
         end
     end
-    cpTraceClose!(trace)
+    traceClose!(trace)
     if param.lazification
         detector.poolpurestates = []
         detector.poolsubstates = []

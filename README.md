@@ -148,18 +148,26 @@ them all. Finished jobs are skipped, so an interrupted run can be restarted.
 ```bash
 export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic
 
-bash scripts/table_m3.sh                    # one table
-bash scripts/run_all_tables.sh              # everything (~200 CPU-hours)
-bash scripts/run_all_tables.sh m3 m5        # a subset
+bash scripts/table_m3.sh                      # one table
+bash scripts/run_all_tables.sh                # everything (~200 CPU-hours)
+bash scripts/run_all_tables.sh m3 m5          # a subset
 
-DRY_RUN=1   bash scripts/run_all_tables.sh  # list the jobs, run nothing
-FORCE=1     bash scripts/table_m3.sh        # re-run jobs that already have results
-TIME_LIMIT=60 bash scripts/table_m3.sh      # quick smoke test (not paper settings)
-USE_SLURM=1 bash scripts/run_all_tables.sh  # emit job lists for run.slurm
+bash scripts/run_all_tables.sh --dry-run      # list the jobs, run nothing
+bash scripts/run_all_tables.sh --force        # redo every experiment from scratch
+bash scripts/table_m3.sh --time-limit 60      # quick smoke test (not paper settings)
+bash scripts/run_all_tables.sh --slurm        # emit job lists for run.slurm
+bash scripts/table_m3.sh --help               # all options
 ```
 
-Environment knobs: `JULIA_BIN`, `RESULTS_DIR`, `TRACE_DIR`, `LOG_DIR`,
-`BENCHMARK_DIR`, `TIME_LIMIT`, `DRY_RUN`, `FORCE`, `USE_SLURM`.
+By default a job whose result file already exists is skipped, so an interrupted
+run can simply be restarted. `--force` (`-f`) ignores existing results and
+re-runs everything; it is forwarded by `run_all_tables.sh` to every table.
+
+Options: `-f/--force`, `-n/--dry-run`, `-t/--time-limit SEC`, `--slurm`,
+`--results-dir`, `--trace-dir`, `--log-dir`, `--julia`, `-h/--help`. The
+equivalent environment variables (`FORCE`, `DRY_RUN`, `TIME_LIMIT`,
+`USE_SLURM`, `RESULTS_DIR`, `TRACE_DIR`, `LOG_DIR`, `JULIA_BIN`,
+`BENCHMARK_DIR`) still work.
 
 Instances are selected by the `N = <m>` line inside each benchmark file, so a
 new benchmark automatically joins the right table.
@@ -183,9 +191,33 @@ Two caveats:
   repository generates, which can differ from the paper where a PDGR value was
   the best.
 - The **gap-closing table** (`tab.m5CP`) averages over CP iterations rather than
-  using final values, so it is built from `results/traces/*.csv`. Those traces
-  are written by any run of `D` or `LDL`; set `EXACTENT_TRACE=<file>` to record
-  one by hand.
+  using final values, so it is built from the trajectory files described below.
+
+### Recording trajectories
+
+Result files hold only the final bounds. Set `EXACTENT_TRACE` to a path
+*prefix* and the two iterative loops each append a CSV trajectory:
+
+| file | columns | written by |
+|---|---|---|
+| `<prefix>.cp.csv` | `iter,is_last,ub_relx,lb_relx,b_lower,n_states` | the cutting plane (`D`, `LDL`, `LD1`, `AD`) |
+| `<prefix>.ladmm.csv` | `iter,zeta,f,pen,residual,grad_norm,z,alm` | LADMM (`LD1`, `LDL`, `LDR*`) |
+
+`b_lower` is the sBB oracle's lower bound for that round, so
+`lb_relx = ub_relx + b_lower`. `residual` is the coupling violation
+‖A(z) + a − Ψ(x)‖₂, which certifies `ub_heur` once it vanishes; `zeta` is the
+LADMM penalty ζ.
+
+The table scripts set this automatically (into `--trace-dir`, default
+`results/traces/`). To record one by hand:
+
+```bash
+EXACTENT_TRACE=/tmp/run julia --project=. scripts/run_experiment.jl -s state_13.jl -a LDL -t 600
+# -> /tmp/run.cp.csv and /tmp/run.ladmm.csv
+```
+
+Tracing is off unless `EXACTENT_TRACE` is set, and the traced and untraced code
+paths are otherwise identical.
 
 ## Run the Python script to parse result data
 
