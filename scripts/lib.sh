@@ -156,14 +156,22 @@ result_exists() {
     return 1
 }
 
+# N_HAVE / N_TODO are tallied across a table so the summary can say what is
+# actually on disk -- in a dry run nothing fails, so counting failures alone
+# reported "all jobs complete" for a table with no results at all.
+N_HAVE=0
+N_TODO=0
+
 run_job() {
     local state="$1" algo="$2"
     if [[ "$FORCE" != "1" ]] && result_exists "$state" "$algo"; then
-        echo "  skip   $state $algo (result exists; --force to redo)"
+        echo "  have   $state $algo"
+        N_HAVE=$((N_HAVE+1))
         return 0
     fi
+    N_TODO=$((N_TODO+1))
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "  would run: $JULIA --project=. scripts/run_experiment.jl -s $state -a $algo -t $TIME_LIMIT"
+        echo "  MISSING $state $algo"
         return 0
     fi
     local trace="$TRACE_DIR/${state}_${algo}"
@@ -268,14 +276,24 @@ run_table() {
     fi
 
     local failed=0
+    N_HAVE=0; N_TODO=0
     for s in "${states[@]}"; do
         for a in "${algos[@]}"; do
             run_job "$s" "$a" || failed=$((failed+1))
         done
     done
+    local total=$((N_HAVE + N_TODO))
     echo "--------------------------------------------------------------"
     if [[ $failed -gt 0 ]]; then
-        echo "Table $table: $failed job(s) FAILED"; return 1
+        echo "Table $table: $failed job(s) FAILED ($N_HAVE/$total have results)"; return 1
     fi
-    echo "Table $table: all jobs complete"
+    if [[ "$DRY_RUN" == "1" ]]; then
+        if [[ $N_TODO -eq 0 ]]; then
+            echo "Table $table: $N_HAVE/$total have results -- nothing to run"
+        else
+            echo "Table $table: $N_HAVE/$total have results, $N_TODO to run"
+        fi
+    else
+        echo "Table $table: all jobs complete ($total results)"
+    fi
 }

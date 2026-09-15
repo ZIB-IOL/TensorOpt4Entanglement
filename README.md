@@ -25,6 +25,10 @@ mkdir .julia_depot                                  # optional: keep them in the
 bash runjobs.sh --env
 ```
 
+`bash runjobs.sh --dry-run` doubles as a status report: it lists every cell as
+`have` or `MISSING` and tallies each table, so it answers "what results do we
+actually have" without running anything.
+
 A Slurm submission runs this check itself and refuses to queue anything if it
 fails (`--skip-env-check` overrides), so a broken environment costs one message
 rather than a hundred failed jobs.
