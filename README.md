@@ -157,12 +157,35 @@ bash scripts/run_all_experiments.sh main ddps_ablation
 bash scripts/run_all_experiments.sh --dry-run     # list jobs, run nothing
 bash scripts/run_all_experiments.sh --force       # redo every experiment
 bash scripts/exp_main.sh -t 60                    # smoke test (not paper settings)
-bash scripts/run_all_experiments.sh --slurm       # emit job lists for run.slurm
+bash runjobs.sh                                  # on the cluster (see below)
 bash scripts/exp_main.sh --help                   # all options
 ```
 
 Finished jobs are skipped, so an interrupted run resumes. `M="3"` restricts an
 experiment to one subsystem count.
+
+### On the cluster
+
+```bash
+bash runjobs.sh                  # generate job lists and submit all three
+bash runjobs.sh main             # just one experiment
+bash runjobs.sh --dry-run        # generate lists, submit nothing
+```
+
+`runjobs.sh` instantiates the project, then calls the same `scripts/exp_*.sh`
+with `--slurm` so they emit job lists instead of running, and submits each as a
+Slurm array. **The experiment design lives in one place**: the cluster runs
+exactly what a local run would, because both go through the same scripts.
+
+```
+runjobs.sh  ->  scripts/exp_*.sh --slurm  ->  job_list_<part>.txt  ->  run.slurm
+```
+
+Each line is `<instance> <algorithm> <timelimit> <results_dir>`; the Julia
+binary is deliberately not in the list, since that is a property of the machine
+— set `JULIA_BIN` (default `julia`). `run.slurm` accepts either an array index
+(`SLURM_ARRAY_TASK_ID`) or a line number as `$1`, and `JOB_LIST` selects which
+list, so the three experiments never collide.
 
 `exp_main.sh` is the raw material for most of the analysis: it produces the
 final bounds, the CP and LADMM trajectories, and the size/memory diagnostics in

@@ -18,6 +18,7 @@ BENCHMARK_DIR="${BENCHMARK_DIR:-$REPO_ROOT/benchmark}"
 # results/ itself still holds the flat files published with the paper.
 # `set_part <name>` is called by each experiment script before running.
 PART="${PART:-}"
+declare -A _JOBLIST_STARTED
 set_part() {
     PART="$1"
     RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results/$PART}"
@@ -165,11 +166,23 @@ run_table() {
     echo "=============================================================="
 
     if [[ "$USE_SLURM" == "1" ]]; then
-        local joblist="$REPO_ROOT/job_list_${table}.txt"; : > "$joblist"
+        # One list per experiment part, in the format run.slurm parses. The
+        # fifth field routes results to this part's directory.
+        local joblist="$REPO_ROOT/job_list_${PART:-$table}.txt"
+        # An experiment calls run_table once per subsystem count, so truncate
+        # only on the first call in this process and append afterwards --
+        # otherwise m=4 would overwrite the m=3 jobs.
+        if [[ -z "${_JOBLIST_STARTED[$joblist]:-}" ]]; then
+            : > "$joblist"
+            _JOBLIST_STARTED[$joblist]=1
+        fi
         for s in "${states[@]}"; do for a in "${algos[@]}"; do
-            echo "$JULIA $s $a $TIME_LIMIT" >> "$joblist"
+            echo "$s $a $TIME_LIMIT $RESULTS_DIR" >> "$joblist"
         done; done
-        echo "wrote $joblist ($(wc -l < "$joblist") jobs); submit with: sbatch --array=1-$(wc -l < "$joblist") run.slurm"
+        local n; n=$(wc -l < "$joblist")
+        echo "wrote $joblist ($n jobs)"
+        echo "submit with:"
+        echo "  JOB_LIST=$(basename "$joblist") sbatch --array=1-$n run.slurm"
         return 0
     fi
 
