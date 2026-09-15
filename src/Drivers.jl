@@ -230,8 +230,12 @@ function runEntangle(args)
                 "$(stats.nnz) nonzeros (built in $(round(stats.build_s, digits=2)) s)")
     end
     glbub, glblb, approxub, approxfeas, approxweights = Inf, -Inf, Inf, 0.0, 0
+    resetPhases!()
     elapsed_time = @elapsed begin
-        glbub, glblb, approxub, approxfeas, approxweights = ALGORITHMS[algo](HR, HI, dims, param)
+        glbub, glblb, approxub, approxfeas, approxweights =
+            withPhase(:total) do
+                ALGORITHMS[algo](HR, HI, dims, param)
+            end
     end
 
     # Overridable so tests and CI do not write into the tracked results/ tree.
@@ -257,6 +261,10 @@ function runEntangle(args)
         println(io, "relax_ncons: $(stats.ncons)")
         println(io, "relax_nnz: $(stats.nnz)")
         println(io, "peak_rss_mib: $(round(peakRSSMiB(), digits=1))")
+        # per-level memory: :total contains :cp, which contains :lmo (see Diagnostics.jl)
+        for line in phaseReport()
+            println(io, line)
+        end
     end
     println("Results saved to $result_file")
     println("Processing complete!")

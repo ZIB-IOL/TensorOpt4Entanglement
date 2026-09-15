@@ -185,7 +185,14 @@ Returns `(purestates, substates, 1 - z, residual, weights)`. The third value is
 the heuristic upper bound `ub_heur`; it is only a valid bound on the original
 problem when `residual` is zero to tolerance.
 """
-function ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param, is_escaping = false, is_high_accuracy = false)
+ALMADMMSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers,
+             param::Param, is_escaping = false, is_high_accuracy = false) =
+    withPhase(:ladmm) do
+        ALMADMMSolve_(detector, dims, H, substates, weights, z, multipliers,
+                      param, is_escaping, is_high_accuracy)
+    end
+
+function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param, is_escaping = false, is_high_accuracy = false)
     obj_tol = param.heur_LADMM_obj_tol * ( is_high_accuracy ? 0.1 : 1)
     step_tol = param.heur_LADMM_step_tol * ( is_high_accuracy ? 0.1 : 1)
     gd_tol = param.heur_LADMM_gd_tol * ( is_high_accuracy ? 0.1 : 1)

@@ -54,6 +54,18 @@ else
                 @test lb > 0.5                      # and it is not vacuous
             end
 
+            @testset "memory is attributed to each level" begin
+                @test runEntangle(args("D")) == 0
+                txt = read(joinpath(outdir, "state_133.jl_D"), String)
+                num(k) = parse(Float64, match(Regex("$k: (\\S+)"), txt).captures[1])
+                # CP calls the oracle, so :cp must contain :lmo, and :total both
+                @test num("mem_lmo_calls") > 0
+                @test num("mem_lmo_alloc_gib") <= num("mem_cp_alloc_gib") + 1e-9
+                @test num("mem_cp_alloc_gib") <= num("mem_total_alloc_gib") + 1e-9
+                @test num("mem_total_peak_rss_mib") > 0
+                @test num("mem_lmo_model_nnz") > 0
+            end
+
             @testset "the bounds bracket each other" begin
                 # DDPS+ lower bound must not exceed the Alt-SDP upper bound
                 @test readbound("state_133.jl_RLT", "glblb") <=

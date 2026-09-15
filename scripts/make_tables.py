@@ -42,6 +42,9 @@ TABLES = {
     "ddps3": dict(m=3, rows=DDPS_ROWS,       kind="main"),
     "ddps4": dict(m=4, rows=DDPS_ROWS,       kind="main"),
     "ddps5": dict(m=5, rows=DDPS_ROWS,       kind="main"),
+    "mem3":  dict(m=3, rows=MAIN_ROWS,       kind="mem"),
+    "mem4":  dict(m=4, rows=MAIN_ROWS,       kind="mem"),
+    "mem5":  dict(m=5, rows=MAIN_ROWS,       kind="mem"),
     "size3": dict(m=3, rows=SIZE_ROWS,       kind="size"),
     "size4": dict(m=4, rows=SIZE_ROWS,       kind="size"),
     "size5": dict(m=5, rows=SIZE_ROWS,       kind="size"),
@@ -77,7 +80,11 @@ def load_result(results_dir, state, algo):
                    time=float(rec["time"]))
         # diagnostics are absent from results produced before they were added
         for k, cast in (("relax_nvars", int), ("relax_ncons", int),
-                        ("relax_nnz", int), ("peak_rss_mib", float)):
+                        ("relax_nnz", int), ("peak_rss_mib", float),
+                        ("mem_total_alloc_gib", float), ("mem_cp_alloc_gib", float),
+                        ("mem_lmo_alloc_gib", float), ("mem_ladmm_alloc_gib", float),
+                        ("mem_lmo_calls", int), ("mem_total_peak_rss_mib", float),
+                        ("mem_lmo_model_nnz", int)):
             try:
                 out[k] = cast(float(rec[k]))
             except (KeyError, ValueError):
@@ -218,6 +225,32 @@ def size_block(states, instances, rows, results_dir):
     return "\n".join(out)
 
 
+def mem_block(states, instances, rows, results_dir):
+    """Per-level memory. Phases nest: total contains cp, which contains lmo."""
+    out, missing = [], 0
+    g = lambda r, k: "-" if r.get(k) is None else f"{r[k]:.2f}"
+    for state in states:
+        disp = escape(display_name(instances[state][0]))
+        out.append("\\midrule")
+        out.append(f"\\multirow{{{len(rows)}}}{{*}}{{{disp}}}")
+        for algo, label, emph in rows:
+            shown = f"\\emph{{{label}}}" if emph else label
+            r = load_result(results_dir, state, algo)
+            if r is None or r.get("mem_total_alloc_gib") is None:
+                out.append(f" & {shown} & N/A & N/A & N/A & N/A & N/A \\\\")
+                missing += 1
+                continue
+            calls = "-" if r.get("mem_lmo_calls") in (None, 0) else str(r["mem_lmo_calls"])
+            rss = "-" if r.get("mem_total_peak_rss_mib") is None else f"{r['mem_total_peak_rss_mib']:.0f}"
+            out.append(f" & {shown} & {g(r,'mem_total_alloc_gib')} & {g(r,'mem_cp_alloc_gib')} & "
+                       f"{g(r,'mem_lmo_alloc_gib')} ({calls}) & {g(r,'mem_ladmm_alloc_gib')} & {rss} \\\\")
+    out.append("\\bottomrule")
+    if missing:
+        print(f"WARNING: {missing} row(s) have no memory diagnostics; those results "
+              f"predate the instrumentation -- re-run with --force", file=sys.stderr)
+    return "\n".join(out)
+
+
 def build(table, args, instances):
     spec = TABLES[table]
     # sorted by display name for determinism; the paper's blocks are in an
@@ -228,6 +261,8 @@ def build(table, args, instances):
         print(f"WARNING: no instances with N = {spec['m']}", file=sys.stderr)
     if spec["kind"] == "gapclosing":
         return gapclosing_block(states, instances, spec["rows"], args.trace_dir)
+    if spec["kind"] == "mem":
+        return mem_block(states, instances, spec["rows"], args.results_dir)
     if spec["kind"] == "size":
         return size_block(states, instances, spec["rows"], args.results_dir)
     return main_block(states, instances, spec["rows"], args.results_dir)

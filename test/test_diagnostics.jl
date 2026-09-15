@@ -47,4 +47,57 @@ const E = ExactEntanglement
             @test haskey(E.ALGORITHMS, code * "_DDPS")
         end
     end
+
+    @testset "phase accounting" begin
+        E.resetPhases!()
+        @test isempty(E.PHASES)
+
+        # nesting: an inner phase's allocations are also counted by the outer one
+        outer = E.withPhase(:total) do
+            x = zeros(200_000)
+            inner = E.withPhase(:lmo) do
+                sum(zeros(400_000))
+            end
+            sum(x) + inner
+        end
+        @test outer == 0.0                                   # value passes through
+        @test E.PHASES[:total].calls == 1
+        @test E.PHASES[:lmo].calls == 1
+        @test E.PHASES[:lmo].alloc > 0
+        @test E.PHASES[:total].alloc >= E.PHASES[:lmo].alloc  # phases are inclusive
+
+        # repeated entry accumulates
+        for _ in 1:3
+            E.withPhase(:lmo) do
+                sum(zeros(1000))
+            end
+        end
+        @test E.PHASES[:lmo].calls == 4
+
+        # an exception still closes the phase and propagates unchanged
+        @test_throws ErrorException E.withPhase(:cp) do
+            error("boom")
+        end
+        @test E.PHASES[:cp].calls == 1
+
+        rep = E.phaseReport()
+        @test any(startswith(l, "mem_total_alloc_gib:") for l in rep)
+        @test any(startswith(l, "mem_lmo_calls: 4") for l in rep)
+
+        E.resetPhases!()
+        @test isempty(E.PHASES)
+    end
+
+    @testset "notePhaseModel! records the largest model" begin
+        E.resetPhases!()
+        m = Model(); @variable(m, y[1:4]); @constraint(m, sum(y) == 1)
+        E.notePhaseModel!(:cp, m; nnz = true)
+        @test E.PHASES[:cp].nvars == 4
+        @test E.PHASES[:cp].ncons >= 1
+        @test E.PHASES[:cp].nnz == 4
+        big = Model(); @variable(big, z[1:9]); @constraint(big, sum(z) == 1)
+        E.notePhaseModel!(:cp, big)
+        @test E.PHASES[:cp].nvars == 9          # keeps the max
+        E.resetPhases!()
+    end
 end

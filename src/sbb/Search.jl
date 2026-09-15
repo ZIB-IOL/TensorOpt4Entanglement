@@ -33,7 +33,7 @@ end
 Solve the tensor-RLT / DDPS+ relaxation once at the sBB root and return its
 objective: a valid lower bound on the white-noise mixing threshold (`-a RLT`).
 """
-function threshold!(problem::Problem, param::Param, effortlevel = 0)
+function threshold_!(problem::Problem, param::Param, effortlevel = 0)
    # create a StateSeparator problem data structure
    print("--separating...\n")
    stateseparator = StateSeparator(problem, param)
@@ -47,6 +47,7 @@ function threshold!(problem::Problem, param::Param, effortlevel = 0)
    focusnodeid = pop!(stateseparator.opennodes)
    focusnode = stateseparatorGetNode(stateseparator, focusnodeid)
    optmodel = initRelaxationThreshold(stateseparator, focusnode)
+   notePhaseModel!(:lmo, optmodel.model; nnz = true)
 
    focusnode.localdualbd = Inf
    status, solverstatus, sol = solveModel(optmodel, BST, stateseparator.param)
@@ -73,7 +74,7 @@ problem even when the search is cut short by the node limit, which is what makes
 gap-closing mode used once `param.is_last` is set, and runs to the larger
 `param.maxeffortnnodes` node limit.
 """
-function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt = false)
+function separate_!(problem::Problem, param::Param, effortlevel = 0, globalobbt = false)
    # create a StateSeparator problem data structure
    print("--separating...\n")
    stateseparator = StateSeparator(problem, param)
@@ -118,6 +119,7 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
             continue
          end
          optmodel = initRelaxationNode(stateseparator, focusnode, stateseparator.primalbd)
+         notePhaseModel!(:lmo, optmodel.model; nnz = true)
          focusnode.localdualbd = Inf
          status, solverstatus, sol = solveModel(optmodel, BST, stateseparator.param)
          if isnothing(status) || !(status == RelaxFeasible || status == RelaxOptimal || status == RelaxInfeasible)
@@ -194,3 +196,15 @@ function separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt =
   end
   return stateseparator.primalbd, stateseparator.dualbd, stateseparator.primalHbar, stateseparator.primalsol
 end
+# The two oracle entry points are wrapped so their memory is attributed to the
+# :lmo phase. The wrappers return exactly what the implementations return and
+# re-raise unchanged, so behaviour is untouched.
+separate!(problem::Problem, param::Param, effortlevel = 0, globalobbt = false) =
+    withPhase(:lmo) do
+        separate_!(problem, param, effortlevel, globalobbt)
+    end
+
+threshold!(problem::Problem, param::Param, effortlevel = 0) =
+    withPhase(:lmo) do
+        threshold_!(problem, param, effortlevel)
+    end

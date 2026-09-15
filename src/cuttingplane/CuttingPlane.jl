@@ -17,7 +17,13 @@ where `weights` are the normalised master duals (`λ_p`), `Mout` the dual matrix
 With `singlerun = true` the routine stops after the first master solve; this is
 the one-shot crossover used by `-a LD1`.
 """
-function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, param::Param, effortlevel = 0, singlerun = false)
+cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, param::Param,
+             effortlevel = 0, singlerun = false) =
+    withPhase(:cp) do
+        cuttingPlane_(detector, separateproblem, param, effortlevel, singlerun)
+    end
+
+function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, param::Param, effortlevel = 0, singlerun = false)
     initialLPRelaxation(detector, param)
     print("LP relaxation created--\n")
     trace = cpTraceSink()
@@ -45,6 +51,7 @@ function cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, p
             end
         end
         print("solve--\n")
+        notePhaseModel!(:cp, detector.model; nnz = true)
         status, solverstatus, primalobj, _ = solveMSK(detector.model, param, false)
         print("end solve-- $status $solverstatus\n")
         isTimeLimitExceeded(param)

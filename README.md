@@ -209,6 +209,29 @@ peak_rss_mib: 1188.9 peak memory of the process
 
 The relaxation is measured **without solving it**, so the three size figures are
 deterministic and machine-independent; only `peak_rss_mib` depends on the host.
+
+Memory is also attributed to each algorithmic level, so you can see *which*
+level needs it rather than only the process total:
+
+```
+mem_total_alloc_gib: 6.32     whole algorithm
+mem_cp_alloc_gib:    5.68     cutting-plane master
+mem_lmo_alloc_gib:   5.19     sBB oracle      mem_lmo_calls: 302
+mem_ladmm_alloc_gib: 3.74     lifted ADMM     mem_ladmm_calls: 1
+```
+
+Each level also records `_live_mib` (largest live heap seen), `_peak_rss_mib`
+and, where it builds a model, `_model_nvars` / `_model_ncons` / `_model_nnz`.
+
+**The phases nest**: `:total` contains `:cp`, which contains the `:lmo` calls it
+makes, so the figures are inclusive and `:lmo` is reported separately to show
+its share. On a short `Dicke_3_1` run the oracle accounted for 5.19 of CP's
+5.68 GiB, while for IR the LADMM and oracle costs were comparable
+(3.74 vs 2.54 GiB).
+
+```bash
+python3 scripts/make_tables.py --table mem3    # per-level memory table
+```
 This is on by default; set `EXACTENT_NO_DIAGNOSTICS=1` to skip the extra model
 build. Result files also record `relaxation`, `seed`, `julia` and `host` for
 provenance.
