@@ -40,9 +40,17 @@ def build(name, ctx):
     return mod.build(name, spec, ctx)
 
 
-def emit_manifest(wanted, ctx):
-    print("# Raw result files behind each table.")
-    print("# Regenerate a table with: python3 scripts/make_tables.py --table <name>")
+def emit_manifest(wanted, ctx, out=None):
+    """List the raw file behind every cell of every table.
+
+    Written to `<out>/MANIFEST.txt` when `out` is given, so the mapping exists
+    as a checked-in artifact a reviewer can read, not only as stdout.
+    """
+    lines = []
+    emit = lines.append
+    emit("# Raw result files behind each table.")
+    emit("# Regenerate a table with: python3 scripts/make_tables.py --table <name>")
+    emit(f"# Search path: {', '.join(os.path.relpath(d, ROOT) for d in ctx.result_dirs)}")
     missing_total = 0
     for name in wanted:
         mod, spec = tables.REGISTRY[name]
@@ -53,14 +61,22 @@ def emit_manifest(wanted, ctx):
         missing = [c for c in cells
                    if c not in found and (c[0], c[1] + " [trace]") not in found]
         missing_total += len(missing)
-        print(f"\n## table {name}  ({len(cells) - len(missing)}/{len(cells)} cells)"
+        emit(f"\n## table {name}  ({len(cells) - len(missing)}/{len(cells)} cells)"
               f"  [{mod.__name__.split('.')[-1]}, from {spec['experiment']}]")
         for (state, algo), path in sorted(found.items()):
-            print(f"  {ctx.name(state):<12} {algo:<14} {path}")
+            emit(f"  {ctx.name(state):<12} {algo:<14} {path}")
         for state, algo in missing:
-            print(f"  {ctx.name(state):<12} {algo:<14} MISSING -> run scripts/{spec['experiment']}")
+            emit(f"  {ctx.name(state):<12} {algo:<14} MISSING -> run scripts/{spec['experiment']}")
+    text = "\n".join(lines) + "\n"
+    if out:
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, "MANIFEST.txt")
+        open(path, "w").write(text)
+        print(f"wrote {path}")
+    else:
+        print(text, end="")
     if missing_total:
-        print(f"\n# {missing_total} cell(s) have no raw file; "
+        print(f"# {missing_total} cell(s) have no raw file; "
               f"run the experiment named beside each one", file=sys.stderr)
 
 
@@ -73,7 +89,7 @@ def main():
                     help="raw-result directory; repeatable, searched in order "
                          f"(default: {', '.join(os.path.relpath(d, ROOT) for d in RESULT_DIRS)})")
     ap.add_argument("--trace-dir", action="append", help="trajectory directory; repeatable")
-    ap.add_argument("--out", help="directory to write <table>.tex into (default: stdout)")
+    ap.add_argument("--out", help="directory to write <table>.tex (or MANIFEST.txt) into")
     ap.add_argument("--manifest", action="store_true",
                     help="list the raw file behind every cell instead of emitting LaTeX")
     ap.add_argument("--list", action="store_true",
@@ -96,7 +112,7 @@ def main():
     wanted = sorted(tables.REGISTRY) if args.table == "all" else [args.table]
 
     if args.manifest:
-        emit_manifest(wanted, ctx)
+        emit_manifest(wanted, ctx, args.out)
         return
 
     for name in wanted:

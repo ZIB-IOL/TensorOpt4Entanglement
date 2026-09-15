@@ -2,5 +2,5 @@
 outputs/
 __pycache__/
 *.pyc
-results/traces/
-results/logs/
+results/*/traces/
+results/*/logs/

@@ -209,11 +209,24 @@ python3 scripts/summarize_traces.py --out plots/
 
 `--manifest` answers "which raw files back this table": it lists every cell with
 its file path, and marks cells with no data as `MISSING` along with the
-experiment that would produce them.
+experiment that would produce them. With `--out` it is written to
+`MANIFEST.txt` so the mapping is a checked-in artifact rather than only
+terminal output:
+
+```bash
+python3 scripts/make_tables.py --manifest --out tables/
+```
 
 Results are searched in `results/main`, `results/lowrank`, `results/ddps`, then
 `results/` itself (the flat files published with the paper), first hit winning —
 so a fresh run shadows the published one without deleting it.
+
+> **Shadowing cuts both ways.** A short smoke run left in `results/main/` will
+> silently take precedence over the published data. Send throwaway runs
+> somewhere else:
+> ```bash
+> bash scripts/exp_main.sh -t 60 --results-dir /tmp/smoke
+> ```
 
 matplotlib is not a dependency: the plot scripts emit whitespace-separated
 `.dat` files that `\addplot table` reads directly.
