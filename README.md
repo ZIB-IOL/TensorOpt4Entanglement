@@ -74,7 +74,8 @@ Short instructions to install the Julia packages this project uses and to reprod
 > updated. The marking is a build artifact, not a real requirement, so clearing
 > it is the standard remedy. A site install is read-only, so patch a copy:
 > ```bash
-> python3 scripts/fix_execstack.py --check   # which libraries are marked
+> python3 scripts/fix_execstack.py --find    # which MOSEK here fits Mosek.jl
+> python3 scripts/fix_execstack.py --check   # what is marked
 > python3 scripts/fix_execstack.py           # patch a copy into ./.mosek_bin
 > export MOSEKBINDIR="$PWD/.mosek_bin"
 > "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
@@ -88,6 +89,24 @@ Short instructions to install the Julia packages this project uses and to reprod
 > bin directory, not only `lib*.so*`: Mosek.jl's build determines the version by
 > *running* `<bindir>/mosek` and parsing its banner, and rejects a directory
 > where that is missing with `does not point to a MOSEK 10.2 bin directory`.
+>
+> **Letting Mosek.jl download its own copy does not avoid this.** Its build
+> derives the MOSEK major.minor from its own package version, so Mosek.jl 10.2
+> fetches MOSEK 10.2 and nothing else — and the newest 10.2 patch, 10.2.19,
+> carries the same marking. Measured on a downloaded copy of each:
+>
+> | MOSEK | `PT_GNU_STACK` |
+> | --- | --- |
+> | 10.2.19 (latest 10.2, from download.mosek.com) | `RWE` — affected |
+> | 11.2 | `RW` — fixed upstream |
+>
+> Escaping the patch therefore means moving the solver to 11.x, which is a
+> `Mosek`/`MosekTools` upgrade in `Project.toml` plus a re-resolve — a
+> different solver from the one the paper's tables were produced with, so every
+> number would have to be regenerated. Patching 10.2 keeps that comparison
+> intact. Neither the version nor the path is hardcoded in the script: it reads
+> the required version from `Manifest.toml` and searches for a matching
+> install, so bumping Mosek.jl makes it follow.
 
 > **Mosek needs a licence file.** The Julia package installs without one, but
 > every solver call then fails with `License cannot be located`. Put your

@@ -18,10 +18,16 @@ somewhere writable and patches the copies; point MOSEKBINDIR at that copy and
 rebuild Mosek.jl. Written against the ELF spec directly so it needs neither
 patchelf nor execstack, which clusters rarely have.
 
+    python3 scripts/fix_execstack.py --find           # what MOSEK is here, which fits
     python3 scripts/fix_execstack.py --check          # report, change nothing
     python3 scripts/fix_execstack.py                  # patch a local copy
+
+Letting Mosek.jl download its own MOSEK does not avoid this. It is pinned to
+its own major.minor (10.2 here, from Manifest.toml) and the newest 10.2 patch,
+10.2.19, carries the same marking; MOSEK cleared it in 11.x. So the version to
+patch is found rather than hardcoded: bump Mosek.jl and this follows.
 """
-import argparse, os, shutil, struct, sys
+import argparse, glob, os, re, shutil, struct, subprocess, sys
 
 PT_GNU_STACK = 0x6474E551
 PF_X = 0x1
@@ -86,6 +92,67 @@ def clear_execstack(path):
     return True
 
 
+def required_version(manifest="Manifest.toml"):
+    """MOSEK major.minor that Mosek.jl demands, read from the Manifest.
+
+    Mosek.jl's build derives it from its own package version and will accept
+    nothing else, so this is what a bin directory has to match -- hardcoding
+    a version here would go stale the moment the Manifest is bumped.
+    """
+    try:
+        with open(manifest) as f:
+            block = False
+            for line in f:
+                line = line.strip()
+                if line.startswith("[["):
+                    block = line == "[[deps.Mosek]]"
+                elif block and line.startswith("version"):
+                    v = line.split("=", 1)[1].strip().strip('"').split(".")
+                    return f"{v[0]}.{v[1]}"
+    except OSError:
+        pass
+    return None
+
+
+def bindir_version(d):
+    """MOSEK version reported by <d>/mosek, the way Mosek.jl's build reads it."""
+    exe = os.path.join(d, "mosek")
+    if not os.access(exe, os.X_OK):
+        return None
+    try:
+        out = subprocess.run([exe], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"MOSEK Version (\d+\.\d+\.\d+)", out)
+    return m.group(1) if m else None
+
+
+def candidates():
+    """Places a MOSEK bin directory plausibly lives, site installs first."""
+    pats = ["/software/mosek/*/tools/platform/*/bin",
+            "/opt/mosek/*/tools/platform/*/bin",
+            os.path.expanduser("~/mosek/*/tools/platform/*/bin"),
+            ".julia_depot/packages/Mosek/*/deps/src/mosek/*/tools/platform/*/bin",
+            os.path.expanduser("~/.julia/packages/Mosek/*/deps/src/mosek/*/tools/platform/*/bin")]
+    seen, out = set(), []
+    for p in pats:
+        for d in sorted(glob.glob(p)):
+            r = os.path.realpath(d)
+            if r not in seen:
+                seen.add(r)
+                out.append(d)
+    return out
+
+
+def find_bindir(want):
+    """First candidate whose `mosek` reports major.minor == want."""
+    for d in candidates():
+        v = bindir_version(d)
+        if v and ".".join(v.split(".")[:2]) == want:
+            return d, v
+    return None, None
+
+
 def is_elf(path):
     try:
         with open(path, "rb") as f:
@@ -108,18 +175,51 @@ def human(n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--src", default=os.environ.get("MOSEKBINDIR"),
-                    help="MOSEK bin directory (default: $MOSEKBINDIR)")
+    ap.add_argument("--src", default=None,
+                    help="MOSEK bin directory (default: $MOSEKBINDIR, else searched for)")
+    ap.add_argument("--find", action="store_true",
+                    help="list every MOSEK found and which one matches the Manifest")
     ap.add_argument("--dst", default=".mosek_bin",
                     help="where to put the patched copy (default: ./.mosek_bin)")
     ap.add_argument("--check", action="store_true",
                     help="report what is marked, change nothing")
     a = ap.parse_args()
 
+    want = required_version()
+
+    if a.find:
+        found = candidates()
+        if not found:
+            print("no MOSEK installation found in the usual places")
+            return 1
+        print(f"Mosek.jl (Manifest.toml) requires MOSEK {want or '?'}\n")
+        for d in found:
+            v = bindir_version(d)
+            if v is None:
+                mark, note_ = "  ?", "no runnable 'mosek' -- Mosek.jl's build would reject it"
+            elif want and ".".join(v.split(".")[:2]) == want:
+                x = is_execstack(os.path.join(d, f"libmosek64.so.{want}"))
+                mark = "  *"
+                note_ = f"{v}  MATCHES" + ("  (executable stack -- needs patching)" if x else "")
+            else:
+                mark, note_ = "   ", f"{v}  (Mosek.jl {want} will not accept this)"
+            print(f"{mark} {d}\n      {note_}")
+        print("\n  * = usable as MOSEKBINDIR")
+        return 0
+
+    a.src = a.src or os.environ.get("MOSEKBINDIR")
     if not a.src:
-        sys.exit("no source directory: pass --src or set MOSEKBINDIR")
+        a.src, v = find_bindir(want) if want else (None, None)
+        if not a.src:
+            sys.exit(f"no MOSEK {want or ''} found: pass --src, set MOSEKBINDIR, "
+                     "or run with --find to see what is here")
+        print(f"using {a.src} (MOSEK {v}, matching Mosek.jl {want})\n")
     if not os.path.isdir(a.src):
         sys.exit(f"not a directory: {a.src}")
+    got = bindir_version(a.src)
+    if want and got and ".".join(got.split(".")[:2]) != want:
+        sys.exit(f"{a.src} is MOSEK {got}, but Mosek.jl needs {want}; "
+                 "its build accepts no other version. Run with --find.")
 
     names = entries(a.src)
     if not names:
