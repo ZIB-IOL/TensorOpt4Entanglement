@@ -67,6 +67,22 @@ Short instructions to install the Julia packages this project uses and to reprod
 > jobs get it too. `bash runjobs.sh --env` runs `ldd` and names any library
 > that is still unresolved.
 
+> **`cannot enable executable stack as shared object requires: Invalid argument`.**
+> MOSEK ships `libmosek64.so` marked `PT_GNU_STACK = RWE`, and recent glibc and
+> kernels refuse to grant an executable stack at `dlopen` time. Nothing about
+> your setup is wrong — the same install stops working when the site's glibc is
+> updated. The marking is a build artifact, not a real requirement, so clearing
+> it is the standard remedy. A site install is read-only, so patch a copy:
+> ```bash
+> python3 scripts/fix_execstack.py --check   # which libraries are marked
+> python3 scripts/fix_execstack.py           # patch a copy into ./.mosek_bin
+> export MOSEKBINDIR="$PWD/.mosek_bin"
+> "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
+> ```
+> The rebuild is required: `deps.jl` bakes in the path, so it must point at the
+> patched copy. `scripts/fix_execstack.py` edits the ELF program header
+> directly and needs neither `patchelf` nor `execstack`.
+
 > **Mosek needs a licence file.** The Julia package installs without one, but
 > every solver call then fails with `License cannot be located`. Put your
 > licence at `~/mosek/mosek.lic`, or point at it explicitly:

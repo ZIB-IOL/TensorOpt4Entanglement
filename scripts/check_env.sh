@@ -132,6 +132,25 @@ if [[ -n "${MOSEKBINDIR:-}" ]]; then
                 pass "libmosek64 resolves all of its shared libraries"
             fi
         fi
+        # Resolving every dependency is still not enough: a library marked
+        # PT_GNU_STACK=RWE is refused outright by recent glibc/kernels, with
+        # an error that names the file rather than the reason.
+        if command -v python3 >/dev/null 2>&1; then
+            if ! python3 scripts/fix_execstack.py --src "$MOSEKBINDIR" --check >/dev/null 2>&1; then
+                marked=$(python3 scripts/fix_execstack.py --src "$MOSEKBINDIR" --check 2>/dev/null \
+                         | awk '/EXECSTACK/{print $2}')
+                if [[ -n "$marked" ]]; then
+                    fail "asks for an executable stack, which dlopen will refuse: $(echo $marked)"
+                    printf "        (\"cannot enable executable stack ...: Invalid argument\")\n"
+                    printf "        patch a writable copy and rebuild against it:\n"
+                    printf "          python3 scripts/fix_execstack.py\n"
+                else
+                    pass "no library asks for an executable stack"
+                fi
+            else
+                pass "no library asks for an executable stack"
+            fi
+        fi
     fi
 else
     note "MOSEKBINDIR unset - Mosek.jl will use whatever its last build resolved"
@@ -163,7 +182,9 @@ if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
         SOLVE_FAIL*)
             msg="${out#SOLVE_FAIL: }"
             fail "$msg"
-            if [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
+            if [[ "$msg" == *"executable stack"* ]]; then
+                printf "        run: python3 scripts/fix_execstack.py\n"
+            elif [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
                 printf "        if the path it names still exists, the library is there but\n"
                 printf "        cannot be dlopen'd - see the unresolved libraries reported above.\n"
                 printf "        if the path is gone, rebuild against one that is not:\n"
