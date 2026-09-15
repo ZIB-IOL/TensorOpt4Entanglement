@@ -145,37 +145,31 @@ directory, so every raw file is attributable to the run that produced it.
 | `scripts/exp_main.sh` | all instances × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+} | `results/main/` | ~210 CPU-h |
 | `scripts/exp_lowrank.sh` | m=5 × LADMM with r = 400…900 | `results/lowrank/` | ~72 CPU-h |
 | `scripts/exp_ddps_ablation.sh` | m=3,4 × the DDPS-only variants | `results/ddps/` | ~44 CPU-h |
-| `scripts/run_all_experiments.sh` | all three, or a named subset | | |
+
 
 ```bash
 export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic
 
-bash scripts/exp_main.sh                          # one experiment
-bash scripts/run_all_experiments.sh               # all of them
-bash scripts/run_all_experiments.sh main ddps_ablation
+bash runjobs.sh                        # submit all experiments to Slurm
+bash runjobs.sh main                   # just one
+bash runjobs.sh --local                # run here instead, sequentially
+bash runjobs.sh --dry-run              # show what would happen, do nothing
+bash runjobs.sh --local main -t 60     # smoke test (not paper settings)
+bash runjobs.sh --force                # redo every experiment
+bash runjobs.sh --help                 # all options
 
-bash scripts/run_all_experiments.sh --dry-run     # list jobs, run nothing
-bash scripts/run_all_experiments.sh --force       # redo every experiment
-bash scripts/exp_main.sh -t 60                    # smoke test (not paper settings)
-bash runjobs.sh                                  # on the cluster (see below)
-bash scripts/exp_main.sh --help                   # all options
+bash scripts/exp_main.sh               # or run one experiment directly
 ```
 
 Finished jobs are skipped, so an interrupted run resumes. `M="3"` restricts an
 experiment to one subsystem count.
 
-### On the cluster
+### One entry point, two destinations
 
-```bash
-bash runjobs.sh                  # generate job lists and submit all three
-bash runjobs.sh main             # just one experiment
-bash runjobs.sh --dry-run        # generate lists, submit nothing
-```
-
-`runjobs.sh` instantiates the project, then calls the same `scripts/exp_*.sh`
-with `--slurm` so they emit job lists instead of running, and submits each as a
-Slurm array. **The experiment design lives in one place**: the cluster runs
-exactly what a local run would, because both go through the same scripts.
+`runjobs.sh` decides only *where* the experiments run; the design lives in
+`scripts/exp_*.sh`. So the cluster and a local machine execute exactly the same
+thing, and the available parts are discovered from the scripts that exist
+rather than listed a second time.
 
 ```
 runjobs.sh  ->  scripts/exp_*.sh --slurm  ->  job_list_<part>.txt  ->  run.slurm
