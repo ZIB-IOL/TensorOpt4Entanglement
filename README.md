@@ -14,6 +14,19 @@ Short instructions to install the Julia packages this project uses and to reprod
 > julia +1.11.6 --project=. -e 'using Pkg; Pkg.instantiate()'
 > ```
 
+> **Mosek.jl must be able to find the solver library.** Its build reads
+> `MOSEKBINDIR` (not `MOSEKHOME`) and bakes the resolved path into `deps.jl`,
+> so if that path later disappears every run fails with
+> `Unable to load libmosek ... Please re-run Pkg.build`. Point it at a site
+> install and rebuild:
+> ```bash
+> export MOSEKBINDIR=/path/to/mosek/10.2/tools/platform/linux64x86/bin
+> julia --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
+> ```
+> Omit `MOSEKBINDIR` to let Mosek.jl download its own copy (needs internet).
+> `runjobs.sh` derives `MOSEKBINDIR` from `MOSEKHOME` when the usual layout is
+> present. `scripts/check_env.sh` reports this case with the fix.
+
 > **Mosek needs a licence file.** The Julia package installs without one, but
 > every solver call then fails with `License cannot be located`. Put your
 > licence at `~/mosek/mosek.lic`, or point at it explicitly:

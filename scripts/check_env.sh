@@ -57,6 +57,18 @@ else
     esac
 fi
 
+echo "== mosek library =="
+if [[ -n "${MOSEKBINDIR:-}" ]]; then
+    ls "$MOSEKBINDIR"/libmosek64.so* >/dev/null 2>&1 \
+        && pass "MOSEKBINDIR: $MOSEKBINDIR" \
+        || fail "MOSEKBINDIR set but has no libmosek64.so*: $MOSEKBINDIR"
+else
+    note "MOSEKBINDIR unset - Mosek.jl will use whatever its last build resolved"
+fi
+if [[ -n "${MOSEKHOME:-}" && ! -d "${MOSEKHOME:-}" ]]; then
+    note "MOSEKHOME points at a missing directory: $MOSEKHOME (Mosek.jl ignores it anyway; it reads MOSEKBINDIR)"
+fi
+
 echo "== a real solve =="
 if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
     # `using` must be a top-level statement of its own: a macro like @variable
@@ -77,7 +89,15 @@ if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
     [[ -n "$out" ]] || out="SOLVE_FAIL: $(echo "$probe" | grep -E 'ERROR|error' | head -1)"
     case "$out" in
         SOLVE_OK)   pass "Mosek solved a test LP" ;;
-        SOLVE_FAIL*) fail "${out#SOLVE_FAIL: }" ;;
+        SOLVE_FAIL*)
+            msg="${out#SOLVE_FAIL: }"
+            fail "$msg"
+            if [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
+                printf "        the Mosek binary recorded at build time is gone. Rebuild:\n"
+                printf "          export MOSEKBINDIR=/path/to/mosek/10.2/tools/platform/linux64x86/bin\n"
+                printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"); Pkg.precompile()'\n"
+                printf "        (omit MOSEKBINDIR to let Mosek.jl download its own copy, needs internet)\n"
+            fi ;;
         SOLVE_WRONG) fail "Mosek ran but returned the wrong answer" ;;
         *)          fail "could not test the solver: $out" ;;
     esac

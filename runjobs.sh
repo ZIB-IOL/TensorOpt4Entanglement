@@ -76,9 +76,26 @@ fi
 # Site defaults, needed by every mode that actually runs Julia. Each is a
 # ${VAR:-default}, so an environment that already sets them wins.
 export LC_ALL=C
-export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-.julia_depot}"
 export MOSEKHOME="${MOSEKHOME:-/software/mosek/10.2}"
 export MOSEKLM_LICENSE_FILE="${MOSEKLM_LICENSE_FILE:-27007@solice01.zib.de}"
+
+# Mosek.jl's build reads MOSEKBINDIR, not MOSEKHOME, and bakes the resolved
+# path into deps.jl -- so pointing only MOSEKHOME at a site install leaves the
+# build to download its own copy, and the package fails to load if that copy is
+# ever missing. Derive MOSEKBINDIR when the site layout is there.
+if [[ -z "${MOSEKBINDIR:-}" ]]; then
+    for d in "$MOSEKHOME/tools/platform/linux64x86/bin" "$MOSEKHOME/bin"; do
+        if [[ -f "$d/libmosek64.so" || -n "$(ls "$d"/libmosek64.so.* 2>/dev/null)" ]]; then
+            export MOSEKBINDIR="$d"
+            break
+        fi
+    done
+fi
+
+# JULIA_DEPOT_PATH is deliberately NOT defaulted: the old value was the
+# relative ".julia_depot", which resolves against each job's working directory
+# and silently hides an already-populated ~/.julia. Set it yourself, to an
+# absolute path, if you want a project-local depot.
 
 # Only a real submission needs the packages resolved up front; --dry-run and
 # --check must not pay for a full instantiate/precompile.
