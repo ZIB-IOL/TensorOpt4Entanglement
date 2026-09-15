@@ -78,6 +78,7 @@ else
     [[ -w "$parent" ]] && pass "depot $d will be created on first use" \
                        || fail "cannot create depot $d ($parent not writable)"
 fi
+DEPOT="$d"          # $d is reused below; keep the depot path for later messages
 if [[ -d "$d/packages/Mosek" ]]; then
     pass "Mosek package present in the depot"
 else
@@ -142,7 +143,14 @@ if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
         SOLVE_FAIL*)
             msg="${out#SOLVE_FAIL: }"
             fail "$msg"
-            if [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
+            if [[ "$msg" == *"not properly installed"* ]]; then
+                printf "        Mosek.jl is installed but never built: Pkg.build writes\n"
+                printf "        deps/deps.jl, and nothing loads without it. Run:\n"
+                printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"; verbose=true)'\n"
+                printf "        the build DOWNLOADS MOSEK, so this machine needs outbound\n"
+                printf "        internet; the reason it failed is in its build.log:\n"
+                printf "          %s/scratchspaces/*/*/build.log\n" "${DEPOT:-$HOME/.julia}"
+            elif [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
                 printf "        Mosek.jl cannot load the solver it built against. Re-fetch it:\n"
                 printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"); Pkg.precompile()'\n"
                 printf "        (this downloads MOSEK, so the machine needs outbound internet)\n"
