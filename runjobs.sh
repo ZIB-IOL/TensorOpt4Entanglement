@@ -49,6 +49,15 @@ MOSEKBINDIR_DEFAULT="/software/mosek/10.2/tools/platform/linux64x86/bin"
 if [[ -n "${MOSEKBINDIR:-}" ]];          then export MOSEKBINDIR
 elif [[ -d "$MOSEKBINDIR_DEFAULT" ]];    then export MOSEKBINDIR="$MOSEKBINDIR_DEFAULT"
 fi
+# libmosek64 links libtbb and friends, which MOSEK ships in this same directory.
+# A site install usually carries no RPATH, so dlopen finds them only here --
+# without this the build succeeds and `using Mosek` then fails to load.
+if [[ -n "${MOSEKBINDIR:-}" ]]; then
+    case ":${LD_LIBRARY_PATH:-}:" in
+        *":$MOSEKBINDIR:"*) ;;
+        *) export LD_LIBRARY_PATH="$MOSEKBINDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    esac
+fi
 
 # MOSEK licence: a file path, or port@host for a floating licence server.
 # ~/mosek/mosek.lic wins over the default, so a laptop needs no edit here.

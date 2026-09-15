@@ -55,7 +55,17 @@ Short instructions to install the Julia packages this project uses and to reprod
 > julia --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
 > ```
 > Omit `MOSEKBINDIR` to let Mosek.jl download its own copy (needs internet).
-> `scripts/check_env.sh` reports this case with the fix.
+>
+> A *successful* build followed by `Unable to load libmosek (<path that exists>)`
+> is a different fault: the file is there but `dlopen` cannot resolve the
+> libraries it links against. MOSEK ships those beside it, and site installs
+> often carry no `RPATH`, so they are found only via the loader path:
+> ```bash
+> export LD_LIBRARY_PATH="$MOSEKBINDIR:$LD_LIBRARY_PATH"
+> ```
+> `runjobs.sh` does this automatically whenever `MOSEKBINDIR` is set, so Slurm
+> jobs get it too. `bash runjobs.sh --env` runs `ldd` and names any library
+> that is still unresolved.
 
 > **Mosek needs a licence file.** The Julia package installs without one, but
 > every solver call then fails with `License cannot be located`. Put your
@@ -128,6 +138,9 @@ Slurm) gets the same one:
 | `MOSEKLM_LICENSE_FILE` | licence file or `port@host` | ZIB licence server |
 | `JULIA_DEPOT_PATH` | package depot | `./.julia_depot` when that directory exists |
 | `MOSEKHOME` | for site scripts only; Mosek.jl ignores it | `/software/mosek/10.2` |
+
+`MOSEKBINDIR` is also prepended to `LD_LIBRARY_PATH`, so `libmosek64.so` can
+find the libraries it ships with.
 
 A value already in the environment always wins, so a one-off override needs no
 edit: `MOSEKBINDIR=/other/path bash runjobs.sh`. The two path defaults apply

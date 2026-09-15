@@ -106,9 +106,33 @@ fi
 
 echo "== mosek library =="
 if [[ -n "${MOSEKBINDIR:-}" ]]; then
-    ls "$MOSEKBINDIR"/libmosek64.so* >/dev/null 2>&1 \
-        && pass "MOSEKBINDIR: $MOSEKBINDIR" \
-        || fail "MOSEKBINDIR set but has no libmosek64.so*: $MOSEKBINDIR"
+    lib=$(ls "$MOSEKBINDIR"/libmosek64.so* 2>/dev/null | head -1)
+    if [[ -z "$lib" ]]; then
+        fail "MOSEKBINDIR set but has no libmosek64.so*: $MOSEKBINDIR"
+    else
+        pass "MOSEKBINDIR: $MOSEKBINDIR"
+        # The file existing is not enough: dlopen also has to resolve the
+        # libraries it links against. MOSEK ships several of them (libtbb and
+        # friends) in this same directory, and a site install often carries no
+        # RPATH, so they are found only via LD_LIBRARY_PATH.
+        if command -v ldd >/dev/null 2>&1; then
+            missing=$(ldd "$lib" 2>/dev/null | awk '/not found/{print $1}' | sort -u)
+            if [[ -n "$missing" ]]; then
+                fail "$(basename "$lib") cannot be loaded; unresolved: $(echo $missing)"
+                sibling=0
+                for m in $missing; do [[ -e "$MOSEKBINDIR/$m" ]] && sibling=1; done
+                if [[ $sibling -eq 1 ]]; then
+                    printf "        they sit next to it in MOSEKBINDIR, so add it to the loader path:\n"
+                    printf "          export LD_LIBRARY_PATH=\"%s:\$LD_LIBRARY_PATH\"\n" "$MOSEKBINDIR"
+                    printf "        (runjobs.sh does this for you; this shell does not)\n"
+                else
+                    printf "        not in MOSEKBINDIR either - load the site module that provides them\n"
+                fi
+            else
+                pass "libmosek64 resolves all of its shared libraries"
+            fi
+        fi
+    fi
 else
     note "MOSEKBINDIR unset - Mosek.jl will use whatever its last build resolved"
 fi
@@ -140,7 +164,9 @@ if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
             msg="${out#SOLVE_FAIL: }"
             fail "$msg"
             if [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
-                printf "        the Mosek binary recorded at build time is gone. Rebuild:\n"
+                printf "        if the path it names still exists, the library is there but\n"
+                printf "        cannot be dlopen'd - see the unresolved libraries reported above.\n"
+                printf "        if the path is gone, rebuild against one that is not:\n"
                 printf "          export MOSEKBINDIR=/path/to/mosek/10.2/tools/platform/linux64x86/bin\n"
                 printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"); Pkg.precompile()'\n"
                 printf "        (omit MOSEKBINDIR to let Mosek.jl download its own copy, needs internet)\n"
