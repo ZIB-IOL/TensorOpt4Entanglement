@@ -25,6 +25,10 @@ mkdir .julia_depot                                  # optional: keep them in the
 bash runjobs.sh --env
 ```
 
+A Slurm submission runs this check itself and refuses to queue anything if it
+fails (`--skip-env-check` overrides), so a broken environment costs one message
+rather than a hundred failed jobs.
+
 Notes:
 - On 1.12+ the Manifest re-resolves to different package versions, so stay on 1.11.x.
 - `+1.11.6` needs juliaup; a plain `julia` reads it as a filename.

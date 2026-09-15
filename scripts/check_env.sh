@@ -120,6 +120,16 @@ if [[ -n "${MOSEKBINDIR:-}" ]]; then
     fi
 fi
 
+# A MOSEK path in a shell profile comes back on the next login and breaks the
+# build again, long after the variable was unset in this shell.
+for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+    [[ -f "$rc" ]] || continue
+    if grep -qE '^[^#]*\b(MOSEKBINDIR|MOSEKHOME)=' "$rc" 2>/dev/null; then
+        note "$rc sets MOSEKBINDIR/MOSEKHOME; it will return next login and Mosek.jl's
+        build rejects any MOSEK that is not its own version - remove it there"
+    fi
+done
+
 echo "== a real solve =="
 if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
     # `using` must be a top-level statement of its own: a macro like @variable

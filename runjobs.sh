@@ -83,10 +83,13 @@ while [[ $# -gt 0 ]]; do
         --local)      MODE=local; shift ;;
         --check)      MODE=check; shift ;;
         --env)        MODE=env; shift ;;
+        --skip-env-check) SKIP_ENV_CHECK=1; shift ;;
         --dry-run|-n) MODE=dry; shift ;;
         -h|--help)
             echo "Usage: $(basename "$0") [parts...] [--local|--dry-run|--check|--env] [options]"
             echo "  parts: ${ALL[*]}   (default: all)"
+            echo "      --env              check this machine can run the jobs"
+            echo "      --skip-env-check   submit without that check"
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
         -*) FLAGS+=("$1")
@@ -123,9 +126,24 @@ fi
 
 # Only a real submission needs the packages resolved up front; --dry-run and
 # --check must not pay for a full instantiate/precompile.
-if [[ "$MODE" == "slurm" ]]; then
+if [[ "$MODE" == "slurm" || "$MODE" == "local" ]]; then
     echo "instantiating the project..."
-    "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
+    # unquoted on purpose: JULIA_BIN may carry a juliaup selector ("julia +1.11.6")
+    # and must word-split into command plus argument
+    $JULIA_BIN --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
+fi
+
+# Queueing a hundred jobs into an environment that cannot solve wastes a whole
+# scheduling round and reports back as a wall of identical job failures, so the
+# same check the user would run by hand runs here first. --skip-env-check
+# bypasses it for the rare case where the login node differs from the nodes.
+if [[ "$MODE" == "slurm" && "${SKIP_ENV_CHECK:-0}" != "1" ]]; then
+    if ! bash scripts/check_env.sh; then
+        echo
+        echo "environment check failed -- nothing submitted." >&2
+        echo "fix the problems above, or re-run with --skip-env-check to submit anyway." >&2
+        exit 1
+    fi
 fi
 
 started=$(date +%s); failed=()
