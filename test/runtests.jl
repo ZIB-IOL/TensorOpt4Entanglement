@@ -1,13 +1,11 @@
 using Test
+using ExactEntanglement
 
-#include("test_2by2.jl")
-#include("test_2by2by2.jl")
-#include("test_3by3.jl")
-#include("test_4sys2by2.jl")
-#include("test_4sys2by2noise.jl")
-#include("test_bipartite.jl")
-#include("test_gme.jl")
-#include("test_horodecki.jl")
-#include("test_horodecki4.jl")
-#include("test_multipartite.jl")
-include("main.jl")
+@testset "ExactEntanglement" begin
+    include("test_mathutils.jl")
+    include("test_lift.jl")
+    include("test_sbb.jl")
+    include("test_params.jl")
+    # Needs a Mosek licence; skipped automatically when none is configured.
+    include("test_integration.jl")
+end
