@@ -45,8 +45,11 @@ export JULIA_BIN="${JULIA_BIN:-julia}"
 # major.minor matches the Mosek.jl version (10.2 for this project's Manifest).
 MOSEKBINDIR_DEFAULT="/software/mosek/10.2/tools/platform/linux64x86/bin"
 # an explicit value always wins; the default only applies where it exists,
-# since pointing Mosek.jl at a missing directory is worse than saying nothing
+# since pointing Mosek.jl at a missing directory is worse than saying nothing.
+# ./.mosek_bin, if scripts/fix_execstack.py made one, wins over the site copy:
+# it is the same libraries with a marking the loader refuses cleared.
 if [[ -n "${MOSEKBINDIR:-}" ]];          then export MOSEKBINDIR
+elif [[ -d "$PWD/.mosek_bin" ]];         then export MOSEKBINDIR="$PWD/.mosek_bin"
 elif [[ -d "$MOSEKBINDIR_DEFAULT" ]];    then export MOSEKBINDIR="$MOSEKBINDIR_DEFAULT"
 fi
 # libmosek64 links libtbb and friends, which MOSEK ships in this same directory.

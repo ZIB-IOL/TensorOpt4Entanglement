@@ -79,6 +79,9 @@ Short instructions to install the Julia packages this project uses and to reprod
 > export MOSEKBINDIR="$PWD/.mosek_bin"
 > "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
 > ```
+> `runjobs.sh` prefers `./.mosek_bin` over the site path whenever it exists, so
+> the export above is only needed for the rebuild; the jobs find it by
+> themselves. Delete the directory to go back to the site copy.
 > The rebuild is required: `deps.jl` bakes in the path, so it must point at the
 > patched copy. `scripts/fix_execstack.py` edits the ELF program header
 > directly and needs neither `patchelf` nor `execstack`.
@@ -150,7 +153,7 @@ Slurm) gets the same one:
 | setting | what it is | shipped default |
 | --- | --- | --- |
 | `JULIA_BIN` | Julia executable | `julia` |
-| `MOSEKBINDIR` | directory holding `libmosek64.so` | site MOSEK 10.2, if present |
+| `MOSEKBINDIR` | directory holding `libmosek64.so` | `./.mosek_bin` if present, else site MOSEK 10.2 |
 | `MOSEKLM_LICENSE_FILE` | licence file or `port@host` | ZIB licence server |
 | `JULIA_DEPOT_PATH` | package depot | `./.julia_depot` when that directory exists |
 | `MOSEKHOME` | for site scripts only; Mosek.jl ignores it | `/software/mosek/10.2` |
