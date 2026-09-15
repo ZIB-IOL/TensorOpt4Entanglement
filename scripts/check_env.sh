@@ -111,6 +111,11 @@ if [[ -n "${MOSEKBINDIR:-}" ]]; then
         fail "MOSEKBINDIR set but has no libmosek64.so*: $MOSEKBINDIR"
     else
         pass "MOSEKBINDIR: $MOSEKBINDIR"
+        # Mosek.jl's build reads the version by running this, not by reading
+        # the libraries; without it the build rejects the directory outright.
+        [[ -x "$MOSEKBINDIR/mosek" ]] \
+            || fail "no runnable 'mosek' in MOSEKBINDIR; Mosek.jl's build probes the version
+        by running it, and rejects the directory when it cannot"
         # The file existing is not enough: dlopen also has to resolve the
         # libraries it links against. MOSEK ships several of them (libtbb and
         # friends) in this same directory, and a site install often carries no

@@ -84,7 +84,10 @@ Short instructions to install the Julia packages this project uses and to reprod
 > themselves. Delete the directory to go back to the site copy.
 > The rebuild is required: `deps.jl` bakes in the path, so it must point at the
 > patched copy. `scripts/fix_execstack.py` edits the ELF program header
-> directly and needs neither `patchelf` nor `execstack`.
+> directly and needs neither `patchelf` nor `execstack`. It mirrors the whole
+> bin directory, not only `lib*.so*`: Mosek.jl's build determines the version by
+> *running* `<bindir>/mosek` and parsing its banner, and rejects a directory
+> where that is missing with `does not point to a MOSEK 10.2 bin directory`.
 
 > **Mosek needs a licence file.** The Julia package installs without one, but
 > every solver call then fails with `License cannot be located`. Put your

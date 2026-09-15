@@ -86,8 +86,23 @@ def clear_execstack(path):
     return True
 
 
-def libs(d):
-    return sorted(n for n in os.listdir(d) if ".so" in n)
+def is_elf(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def entries(d):
+    return sorted(os.listdir(d))
+
+
+def human(n):
+    for u in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or u == "GiB":
+            return f"{n:.0f} {u}" if u == "B" else f"{n:.1f} {u}"
+        n /= 1024
 
 
 def main():
@@ -98,7 +113,7 @@ def main():
     ap.add_argument("--dst", default=".mosek_bin",
                     help="where to put the patched copy (default: ./.mosek_bin)")
     ap.add_argument("--check", action="store_true",
-                    help="report which libraries are marked, change nothing")
+                    help="report what is marked, change nothing")
     a = ap.parse_args()
 
     if not a.src:
@@ -106,45 +121,62 @@ def main():
     if not os.path.isdir(a.src):
         sys.exit(f"not a directory: {a.src}")
 
-    names = libs(a.src)
+    names = entries(a.src)
     if not names:
-        sys.exit(f"no shared libraries in {a.src}")
+        sys.exit(f"nothing in {a.src}")
 
     if a.check:
-        bad = 0
+        bad = elves = 0
         for n in names:
             p = os.path.join(a.src, n)
             if os.path.islink(p):
                 print(f"  link  {n} -> {os.readlink(p)}")
                 continue
+            if not is_elf(p):
+                continue
+            elves += 1
             m = is_execstack(p)
-            label = {True: "EXECSTACK", False: "ok", None: "not an ELF file"}[m]
+            label = {True: "EXECSTACK", False: "ok", None: "no PT_GNU_STACK"}[m]
             print(f"  {label:>15}  {n}")
             bad += m is True
-        print(f"\n{bad} of {len(names)} need patching"
-              if bad else "\nnothing to patch: no library asks for an executable stack")
+        print(f"\n{bad} of {elves} need patching"
+              if bad else "\nnothing to patch: nothing asks for an executable stack")
         return 0 if bad == 0 else 1
 
+    # Mirror the whole directory, not just the libraries: Mosek.jl's build
+    # determines the version by RUNNING `<bindir>/mosek` and parsing its
+    # banner, so a copy holding only lib*.so* is rejected with
+    # "does not point to a MOSEK <x.y> bin directory".
     os.makedirs(a.dst, exist_ok=True)
-    patched = copied = 0
+    patched = copied = links = nbytes = 0
     for n in names:
         src, dst = os.path.join(a.src, n), os.path.join(a.dst, n)
         if os.path.lexists(dst):
-            os.remove(dst)
+            shutil.rmtree(dst) if os.path.isdir(dst) and not os.path.islink(dst) else os.remove(dst)
         if os.path.islink(src):
             # keep the symlink chain (libmosek64.so -> libmosek64.so.10.2)
             os.symlink(os.readlink(src), dst)
+            links += 1
+            continue
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
             continue
         shutil.copy2(src, dst)
         os.chmod(dst, os.stat(dst).st_mode | 0o200)   # a read-only source copies read-only
         copied += 1
+        nbytes += os.path.getsize(dst)
         if clear_execstack(dst):
             patched += 1
             print(f"  cleared executable stack: {n}")
 
-    print(f"\ncopied {copied} libraries to {a.dst}, patched {patched}")
+    print(f"\ncopied {copied} files + {links} symlinks ({human(nbytes)}) to {a.dst}, "
+          f"patched {patched}")
+    mosekbin = os.path.join(a.dst, "mosek")
+    if not os.path.isfile(mosekbin):
+        print("warning: no 'mosek' executable in the copy -- Mosek.jl's build probes")
+        print("         the version by running it and will reject this directory")
     if patched == 0:
-        print("no library was marked -- the load failure has another cause")
+        print("nothing was marked -- the load failure has another cause")
         return 1
     full = os.path.abspath(a.dst)
     print("\nnow point Mosek.jl at the patched copy and rebuild:")
