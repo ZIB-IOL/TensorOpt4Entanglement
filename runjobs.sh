@@ -10,6 +10,7 @@
 #   bash runjobs.sh --local            run here instead, sequentially
 #   bash runjobs.sh --force            redo everything, ignoring existing results
 #   bash runjobs.sh --dry-run          show what would happen, do nothing
+#   bash runjobs.sh --env              check the site settings below resolve
 #   bash runjobs.sh --local main -t 60 forward options to the experiments
 #
 # Cluster path:
@@ -23,6 +24,58 @@
 # results and redoes everything.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# ---------------------------------------------------------------------------
+# Site settings -- edit these for your machine.
+#
+# Everything the runs need is set here and nowhere else. An explicit value
+# from the environment always wins, so you can override one without editing:
+#     MOSEKBINDIR=/other/path bash runjobs.sh
+#
+# Check that they resolve on this machine with:  bash runjobs.sh --env
+# ---------------------------------------------------------------------------
+
+export LC_ALL=C
+
+# Julia executable. On a cluster this is usually just "julia" from the module.
+export JULIA_BIN="${JULIA_BIN:-julia}"
+
+# MOSEK solver library. Mosek.jl reads MOSEKBINDIR at BUILD time and bakes the
+# path into deps.jl, so it must point at the bin directory of a MOSEK whose
+# major.minor matches the Mosek.jl version (10.2 for this project's Manifest).
+MOSEKBINDIR_DEFAULT="/software/mosek/10.2/tools/platform/linux64x86/bin"
+# an explicit value always wins; the default only applies where it exists,
+# since pointing Mosek.jl at a missing directory is worse than saying nothing
+if [[ -n "${MOSEKBINDIR:-}" ]];          then export MOSEKBINDIR
+elif [[ -d "$MOSEKBINDIR_DEFAULT" ]];    then export MOSEKBINDIR="$MOSEKBINDIR_DEFAULT"
+fi
+
+# MOSEK licence: a file path, or port@host for a floating licence server.
+# ~/mosek/mosek.lic wins over the default, so a laptop needs no edit here.
+MOSEKLM_LICENSE_FILE_DEFAULT="27007@solice01.zib.de"
+if [[ -n "${MOSEKLM_LICENSE_FILE:-}" ]];  then export MOSEKLM_LICENSE_FILE
+elif [[ ! -f "$HOME/mosek/mosek.lic" ]];  then export MOSEKLM_LICENSE_FILE="$MOSEKLM_LICENSE_FILE_DEFAULT"
+fi
+
+# Julia package depot. A project-local depot keeps packages on the same
+# filesystem as the repo and isolates the run from a shared ~/.julia; it is
+# opt-in, so `mkdir .julia_depot` once to use it and "" to force ~/.julia.
+# A relative path is made absolute below: it would otherwise resolve against
+# each job's working directory rather than the repo.
+JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-$([[ -d "$PWD/.julia_depot" ]] && echo "$PWD/.julia_depot")}"
+case "$JULIA_DEPOT_PATH" in
+    "")   unset JULIA_DEPOT_PATH ;;                    # use ~/.julia
+    /*|*:*) export JULIA_DEPOT_PATH ;;                 # already absolute
+    *)    export JULIA_DEPOT_PATH="$PWD/$JULIA_DEPOT_PATH" ;;
+esac
+
+# Kept for site scripts that read it; Mosek.jl itself does not.
+MOSEKHOME_DEFAULT="/software/mosek/10.2"
+if [[ -n "${MOSEKHOME:-}" ]];        then export MOSEKHOME
+elif [[ -d "$MOSEKHOME_DEFAULT" ]];  then export MOSEKHOME="$MOSEKHOME_DEFAULT"
+fi
+
+# ---------------------------------------------------------------------------
 
 # One stamp for this invocation: every job list it writes carries it, so a
 # resubmission cannot disturb the lists a pending array is still reading.
@@ -41,9 +94,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --local)      MODE=local; shift ;;
         --check)      MODE=check; shift ;;
+        --env)        MODE=env; shift ;;
         --dry-run|-n) MODE=dry; shift ;;
         -h|--help)
-            echo "Usage: $(basename "$0") [parts...] [--local|--dry-run|--check] [options]"
+            echo "Usage: $(basename "$0") [parts...] [--local|--dry-run|--check|--env] [options]"
             echo "  parts: ${ALL[*]}   (default: all)"
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
@@ -55,6 +109,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ ${#PARTS[@]} -eq 0 ]] && PARTS=("${ALL[@]}")
+
+# --env validates the environment these settings actually produce, which is
+# not the same as the caller's ambient one.
+if [[ "$MODE" == "env" ]]; then
+    exec bash scripts/check_env.sh
+fi
 
 if [[ "$MODE" == "check" ]]; then
     # Generate this invocation's lists, then audit coverage against *only*
@@ -73,50 +133,11 @@ if [[ "$MODE" == "check" ]]; then
     exit $?
 fi
 
-# Site defaults, needed by every mode that actually runs Julia. Each is a
-# ${VAR:-default}, so an environment that already sets them wins.
-export LC_ALL=C
-export MOSEKHOME="${MOSEKHOME:-/software/mosek/10.2}"
-export MOSEKLM_LICENSE_FILE="${MOSEKLM_LICENSE_FILE:-27007@solice01.zib.de}"
-
-# Mosek.jl's build reads MOSEKBINDIR, not MOSEKHOME, and bakes the resolved
-# path into deps.jl -- so pointing only MOSEKHOME at a site install leaves the
-# build to download its own copy, and the package fails to load if that copy is
-# ever missing. Derive MOSEKBINDIR when the site layout is there.
-if [[ -z "${MOSEKBINDIR:-}" ]]; then
-    for d in "$MOSEKHOME/tools/platform/linux64x86/bin" "$MOSEKHOME/bin"; do
-        if [[ -f "$d/libmosek64.so" || -n "$(ls "$d"/libmosek64.so.* 2>/dev/null)" ]]; then
-            export MOSEKBINDIR="$d"
-            break
-        fi
-    done
-fi
-
-# Project-local Julia depot, opt-in by creating the directory:
-#
-#     mkdir .julia_depot && bash runjobs.sh ...
-#
-# This isolates the run from ~/.julia (useful when $HOME has a quota, or when a
-# shared depot has drifted from Manifest.toml) and keeps the packages on the
-# same filesystem as the repo. The first run then installs everything into it.
-#
-# The path is made ABSOLUTE: the old value was the relative ".julia_depot",
-# which resolves against each job's working directory rather than the repo, and
-# silently shadowed an already-populated ~/.julia.
-if [[ -n "${JULIA_DEPOT_PATH:-}" ]]; then
-    case "$JULIA_DEPOT_PATH" in
-        /*|*:*) : ;;                                   # absolute, or a list the user built
-        *) export JULIA_DEPOT_PATH="$PWD/$JULIA_DEPOT_PATH" ;;
-    esac
-elif [[ -d "$PWD/.julia_depot" ]]; then
-    export JULIA_DEPOT_PATH="$PWD/.julia_depot"
-fi
-
 # Only a real submission needs the packages resolved up front; --dry-run and
 # --check must not pay for a full instantiate/precompile.
 if [[ "$MODE" == "slurm" ]]; then
     echo "instantiating the project..."
-    julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
+    "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' || exit 1
 fi
 
 started=$(date +%s); failed=()

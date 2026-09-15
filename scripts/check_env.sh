@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Check that this machine can actually run the experiments.
 #
-#   bash scripts/check_env.sh
+#   bash scripts/check_env.sh     inspect the current shell's environment
+#   bash runjobs.sh --env         inspect the one the jobs will actually get
+#
+# The second applies runjobs.sh's Site settings block first, so prefer it when
+# you are about to submit; this script on its own sees only your shell.
 #
 # Reports every problem it finds rather than stopping at the first, and exits
 # non-zero if anything would prevent a run. Safe to run anywhere: it solves one

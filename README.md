@@ -38,8 +38,7 @@ Short instructions to install the Julia packages this project uses and to reprod
 > julia --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
 > ```
 > Omit `MOSEKBINDIR` to let Mosek.jl download its own copy (needs internet).
-> `runjobs.sh` derives `MOSEKBINDIR` from `MOSEKHOME` when the usual layout is
-> present. `scripts/check_env.sh` reports this case with the fix.
+> `scripts/check_env.sh` reports this case with the fix.
 
 > **Mosek needs a licence file.** The Julia package installs without one, but
 > every solver call then fails with `License cannot be located`. Put your
@@ -91,14 +90,34 @@ Everything goes through `runjobs.sh`; see
 full workflow. In short:
 
 ```bash
-export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic   # or port@host for a licence server
-
-bash scripts/check_env.sh    # can this machine run the jobs at all?
+bash runjobs.sh --env        # can this machine run the jobs at all?
 bash runjobs.sh --check      # verify every table would have data
 bash runjobs.sh --dry-run    # list the jobs, run nothing
 bash runjobs.sh --local      # run here, sequentially
 bash runjobs.sh              # submit to Slurm
 ```
+
+### Site settings
+
+`runjobs.sh` opens with a **Site settings** block — a handful of plain
+assignments you edit once for your machine. It is the only place the runs take
+their environment from, and every mode (`--local`, `--dry-run`, `--check`,
+Slurm) gets the same one:
+
+| setting | what it is | shipped default |
+| --- | --- | --- |
+| `JULIA_BIN` | Julia executable | `julia` |
+| `MOSEKBINDIR` | directory holding `libmosek64.so` | site MOSEK 10.2, if present |
+| `MOSEKLM_LICENSE_FILE` | licence file or `port@host` | ZIB licence server |
+| `JULIA_DEPOT_PATH` | package depot | `./.julia_depot` when that directory exists |
+| `MOSEKHOME` | for site scripts only; Mosek.jl ignores it | `/software/mosek/10.2` |
+
+A value already in the environment always wins, so a one-off override needs no
+edit: `MOSEKBINDIR=/other/path bash runjobs.sh`. The two path defaults apply
+only where they exist, so the file works unedited on a laptop with a local
+Mosek build. `bash runjobs.sh --env` runs `scripts/check_env.sh` against the
+settings these produce, which is what the jobs will actually see —
+`scripts/check_env.sh` on its own only inspects your current shell.
 
 `scripts/check_env.sh` checks Julia's version, the project layout, writable
 output directories, disk space, the Mosek licence — by solving a test LP, not
