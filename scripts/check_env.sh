@@ -104,6 +104,21 @@ else
     esac
 fi
 
+# We never set MOSEKBINDIR -- Mosek.jl fetches its own solver. One left over in
+# the environment overrides that, and the build fails outright when it does not
+# match Mosek.jl's version.
+if [[ -n "${MOSEKBINDIR:-}" ]]; then
+    want=$(grep -A5 '^\[\[deps.Mosek\]\]$' Manifest.toml 2>/dev/null \
+           | grep '^version' | head -1 | cut -d'"' -f2 | cut -d. -f1,2)
+    got=$("$MOSEKBINDIR/mosek" 2>/dev/null | grep -oE 'MOSEK Version [0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
+    if [[ -n "$want" && "$got" != "$want" ]]; then
+        fail "MOSEKBINDIR is set to ${MOSEKBINDIR} (MOSEK ${got:-unreadable}), but Mosek.jl needs $want;
+        its build will reject it. This project sets no MOSEKBINDIR -- run: unset MOSEKBINDIR"
+    else
+        note "MOSEKBINDIR is set ($MOSEKBINDIR); Mosek.jl will use it instead of its own copy"
+    fi
+fi
+
 echo "== a real solve =="
 if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
     # `using` must be a top-level statement of its own: a macro like @variable

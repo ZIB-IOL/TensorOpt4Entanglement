@@ -31,6 +31,8 @@ Notes:
 - `.julia_depot/` is used only if it exists; the first install takes a few GB.
 - Mosek.jl downloads MOSEK 11.2 itself, so no solver path to configure — but
   the machine that installs needs outbound internet.
+- Do not set `MOSEKBINDIR`: it overrides that, and the build rejects any MOSEK
+  whose version differs from Mosek.jl's. `unset MOSEKBINDIR` if one is left over.
 
 - Project directory layout:
     - `src/` — the `ExactEntanglement` package
