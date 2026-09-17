@@ -25,6 +25,16 @@ mkdir .julia_depot                                  # optional: keep them in the
 bash runjobs.sh --env
 ```
 
+Each job writes two files: the Julia output to
+`results/<part>/logs/<instance>_<algo>.log`, and Slurm's own output to
+`outputs/slurm-<jobid>_<task>.out`. The second is where a job killed for
+exceeding `--mem` or `--time` is reported — the Julia log only holds what the
+process itself printed, so a kill is invisible there:
+
+```bash
+grep -l 'slurmstepd\|CANCELLED\|Killed' outputs/*.out
+```
+
 `bash runjobs.sh --dry-run` doubles as a status report: it lists every cell as
 `have` or `MISSING` and tallies each table, so it answers "what results do we
 actually have" without running anything.

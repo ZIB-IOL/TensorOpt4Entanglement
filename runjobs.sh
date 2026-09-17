@@ -194,6 +194,9 @@ if [[ "$MODE" == "slurm" ]]; then
         fi
         total=$((total + n))
         echo "submitting $list ($n jobs)"
+        # Slurm will not create the directory its --output path names, and a
+        # job whose output file cannot be opened never starts.
+        mkdir -p outputs
         JOB_LIST="$list" sbatch --array=1-"$n" run.slurm || failed+=("$list")
     done
     if [[ $total -eq 0 ]]; then

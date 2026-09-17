@@ -10,8 +10,13 @@
 #SBATCH --time=05:58:00
 #SBATCH --partition=opt_int
 #SBATCH --constraint=Gold5222 # the paper reports Gold 5122
-#SBATCH --output=/dev/null
-#SBATCH --error=/dev/null
+# Slurm's own output, kept rather than discarded: a job killed for exceeding
+# --mem or --time is reported HERE by slurmstepd and nowhere else. The Julia
+# log beside the results only has what the process itself printed, so with
+# these pointed at /dev/null an OOM kill left no trace anywhere and the cell
+# simply looked as though it had never run. stderr merges into this file.
+# %A is the array job id, %a the task index.
+#SBATCH --output=outputs/slurm-%A_%a.out
 #
 # Runs one line of a job list produced by scripts/exp_*.sh --slurm.
 #
@@ -52,6 +57,11 @@ PARAM=$(sed -n "${LINENUM}p" "$JOB_LIST")
 read -r instance algorithm timelimit resultsdir <<< "$PARAM"
 juliabin="${JULIA_BIN:-julia}"
 
+# Context first, so a truncated or killed job still says what it was and where.
+echo "job ${SLURM_JOB_ID:-?} task ${SLURM_ARRAY_TASK_ID:-?} on $(hostname)"
+echo "instance=$instance algorithm=$algorithm timelimit=$timelimit"
+echo "mem=${SLURM_MEM_PER_NODE:-?}M cpus=${SLURM_CPUS_PER_TASK:-?} started $(date -Is)"
+
 # Log beside the results, exactly where a --local run puts it, so a job's
 # output is in one predictable place however it was started. outputs/ is the
 # fallback for a job list that carries no results directory.
@@ -75,3 +85,6 @@ echo "$juliabin --project=. scripts/run_experiment.jl -s $instance -a $algorithm
 srun $juliabin --compiled-modules=existing --project=. scripts/run_experiment.jl \
      -s "$instance" -a "$algorithm" -t "$timelimit" \
      > "$logfile" 2>&1
+rc=$?
+echo "finished $(date -Is) rc=$rc; julia output in $logfile"
+exit $rc
