@@ -199,6 +199,14 @@ function withRelaxation(code::String, mode::Symbol)
     end
 end
 
+"""
+Relaxation each algorithm code runs its oracle with, for codes that do not use
+the default. `runEntangle` applies this to `param` *before* measuring the root
+relaxation: the algorithm itself sets it too, but that happens after the
+measurement, so a diagnostic taken first would describe the wrong model.
+"""
+const ALGORITHM_RELAXATION = Dict{String,Symbol}()
+
 # The rank sweep is LADMM at a fixed factorisation size; the size itself is
 # applied by applySizePreset! from RANK_SWEEP.
 for code in keys(RANK_SWEEP)
@@ -210,6 +218,9 @@ end
 ALGORITHMS["DDPS"]    = withRelaxation("DDPS+", :ddps)
 ALGORITHMS["CP-DDPS"] = withRelaxation("CP", :ddps)
 ALGORITHMS["IR-DDPS"] = withRelaxation("IR", :ddps)
+for code in ("DDPS", "CP-DDPS", "IR-DDPS")
+    ALGORITHM_RELAXATION[code] = :ddps
+end
 
 function runEntangle(args)
     println("Loading benchmark data from: $(args["state"])")
@@ -256,6 +267,14 @@ function runEntangle(args)
     applySizePreset!(param, length(dims), algo)
 
     haskey(ALGORITHMS, algo) || error("unknown algorithm $algo; expected one of $(sort(collect(keys(ALGORITHMS))))")
+
+    # The oracle relaxation has to be settled before the root relaxation is
+    # measured, or the diagnostic describes a model the run never builds: the
+    # DDPS codes set it inside the algorithm, which runs after this point, so
+    # every DDPS row otherwise reported DDPS+ sizes.
+    if haskey(ALGORITHM_RELAXATION, algo)
+        param.relaxation = ALGORITHM_RELAXATION[algo]
+    end
 
     # Size of the sBB root relaxation, measured without solving it.
     stats = relaxationStats(HR, HI, dims, param)
