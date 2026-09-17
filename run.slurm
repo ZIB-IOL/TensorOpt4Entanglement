@@ -2,7 +2,11 @@
 #SBATCH --job-name=sdto
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=10G
+# 24G, not 10G: DPS at m=3 uses level 6 and peaks at 12.9 GiB -- the smallest
+# physical instance builds the largest SDP here, and at 10G Slurm killed those
+# three jobs with no result file and nothing in the log. Alt-SDP at m=5 peaks
+# at 8.4 GiB, which left under 2 GiB of headroom for every other job.
+#SBATCH --mem=24G
 #SBATCH --time=05:58:00
 #SBATCH --partition=opt_int
 #SBATCH --constraint=Gold5222 # the paper reports Gold 5122
