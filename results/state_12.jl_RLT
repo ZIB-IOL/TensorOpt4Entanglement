@@ -1,8 +1,0 @@
-instance: state_12.jl
-algo: RLT
-glbub: 0
-approxub: 0
-approxfeas: 0
-glblb: 0.8601422925057203
-approxweights: 0
-time: 19.17052091

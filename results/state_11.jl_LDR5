@@ -1,8 +1,0 @@
-instance: state_11.jl
-algo: LDR5
-glbub: 0.9999999999916184
-approxub: 0.8714841089696981
-approxfeas: 0.08047464599316259
-glblb: -Inf
-approxweights: 0.0
-time: 11453.475422432

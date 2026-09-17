@@ -1,8 +1,0 @@
-instance: state_10.jl
-algo: LDR2
-glbub: 0.9999999998472049
-approxub: 0.9411876331972058
-approxfeas: 7.623044254169387e-6
-glblb: -Inf
-approxweights: 0.0
-time: 10813.223508871

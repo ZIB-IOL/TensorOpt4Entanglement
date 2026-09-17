@@ -1,8 +1,0 @@
-instance: state_11.jl
-algo: LD1
-glbub: 0.9999999999988904
-approxub: 0.9732698024643167
-approxfeas: 0.009568134507011267
-glblb: -Inf
-approxweights: 0.0
-time: 11862.993909642
