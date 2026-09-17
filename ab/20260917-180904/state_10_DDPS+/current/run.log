@@ -1,0 +1,17 @@
+Starting ExactEntanglement.jl main script...
+Loading benchmark data from: state_10.jl
+Loaded data:
+  T = Float64
+  N = 5
+  dims = (2, 2, 2, 2, 2)
+  ρ size = (32, 32)
+Parameters:
+  algorithm = DDPS+
+  solver = MSK
+  time_limit = -1.0
+  log_level = 1
+  maxrounds = 100
+Root relaxation: 1140 vars, 13638 constraints, 64524 nonzeros, 1.3 MiB as CBF (measured in 23.14 s)
+--separating...
+Results saved to /scratch/opt/lxu/TensorOpt4Entanglement_Debug/ab/20260917-180904/state_10_DDPS+/current/state_10.jl_DDPS+
+Processing complete!

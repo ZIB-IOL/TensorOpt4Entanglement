@@ -1,0 +1,16 @@
+Starting ExactEntanglement.jl main script...
+Loading benchmark data from: state_10.jl
+Loaded data:
+  T = Float64
+  N = 5
+  dims = (2, 2, 2, 2, 2)
+  ρ size = (32, 32)
+Parameters:
+  algorithm = RLT
+  solver = MSK
+  time_limit = -1.0
+  log_level = 1
+  maxrounds = 100
+--separating...
+Results saved to /scratch/opt/lxu/legacy-ab/src/../results/state_10.jl_RLT
+Processing complete!

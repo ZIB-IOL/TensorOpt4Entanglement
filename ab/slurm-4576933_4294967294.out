@@ -1,0 +1,4 @@
+side=current tree=/scratch/opt/lxu/TensorOpt4Entanglement_Debug node=htc-cmp483.zib.de started 2026-09-17T18:14:41+02:00
+instance=state_11.jl algo=LADMM_900 timelimit=-1
+model name	: Intel(R) Xeon(R) Gold 5222 CPU @ 3.80GHz
+finished 2026-09-17T21:16:09+02:00 rc=0
