@@ -1,0 +1,15 @@
+# Cells where the current branch and the published legacy runs disagree.
+# Format: <instance> <current algo> <legacy algo> <time limit, -1 = preset>
+#
+# The m=5 dual-bound cluster -- the unexplained group.
+state_11.jl  CP        D     -1
+state_13.jl  CP        D     -1
+state_10.jl  CP        D     -1
+# The outlier: sign flip, 0.54 apart.
+state_10.jl  IR        LDL   -1
+# The low-rank sweep cell with the widest spread.
+state_11.jl  LADMM_900 LDR5  -1
+# Controls: these agreed to 10+ digits, so a divergence here means the
+# harness itself is wrong, not the code under test.
+state_10.jl  DDPS+     RLT   -1
+state_033.jl DDPS+     RLT   -1
