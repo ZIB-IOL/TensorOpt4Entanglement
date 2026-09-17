@@ -6,3 +6,6 @@ results/*/traces/
 results/*/logs/
 joblists/
 
+
+# A/B comparison output (scripts/ab)
+ab/

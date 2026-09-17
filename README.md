@@ -3,15 +3,15 @@
 Short instructions to install the Julia packages this project uses and to reproduce the paper's experiments, locally or on a Slurm cluster.
 
 ## Prerequisites
-- Linux machine with Julia 1.11.x (tested with 1.11.6).
-- A MOSEK licence. The solver itself is fetched by Mosek.jl (MOSEK 11.2).
+- Linux machine with Julia 1.11.4 — the exact version the `Manifest.toml` records.
+- A MOSEK licence. The solver itself is fetched by Mosek.jl (MOSEK 10.2).
 - A working Slurm cluster.
 
 ### Setup
 
 ```bash
-# 1. Julia 1.11.x -- the Manifest is resolved for it
-juliaup add 1.11.6 && export JULIA_BIN='julia +1.11.6'
+# 1. Julia 1.11.4 -- the version the Manifest records
+juliaup add 1.11.4 && export JULIA_BIN='julia +1.11.4'
 # no juliaup? unpack an official tarball and set JULIA_BIN to its bin/julia
 
 # 2. MOSEK licence -- the solver itself is fetched by Mosek.jl
@@ -50,10 +50,20 @@ recompiles the depot at once and blocks on the others
 
 Notes:
 - On 1.12+ the Manifest re-resolves to different package versions, so stay on 1.11.x.
-- `+1.11.6` needs juliaup; a plain `julia` reads it as a filename.
+- `+1.11.4` needs juliaup; a plain `julia` reads it as a filename.
 - `.julia_depot/` is used only if it exists; the first install takes a few GB.
-- Mosek.jl downloads MOSEK 11.2 itself, so no solver path to configure — but
+- Mosek.jl downloads MOSEK 10.2 itself, so no solver path to configure — but
   the machine that installs needs outbound internet.
+- **MOSEK 10.2 will not load on a recent glibc** without a patch: its
+  `libmosek64.so` declares `PT_GNU_STACK = RWE`, and modern glibc refuses to
+  make the stack executable at `dlopen`, failing with
+  `cannot enable executable stack as shared object requires: Invalid argument`.
+  Clear the flag on a copy and build against it:
+  ```bash
+  python3 scripts/fix_execstack.py --src /path/to/mosek/10.2/tools/platform/linux64x86/bin
+  export MOSEKBINDIR=$PWD/.mosek_bin
+  "$JULIA_BIN" --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
+  ```
 - Do not set `MOSEKBINDIR`: it overrides that, and the build rejects any MOSEK
   whose version differs from Mosek.jl's. `unset MOSEKBINDIR` if one is left over.
 
