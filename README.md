@@ -109,9 +109,11 @@ and node feature named in `run.slurm` actually exist and that `MaxArraySize` is
 large enough. It reports every problem rather than stopping at the first.
 
 On the cluster, adjust the resource requests at the top of `run.slurm`
-(`--mem`, `--time`, `--partition`) to your site; the paper's runs used 10 GB
-and one thread per job. There is no `--constraint`, so jobs take any node in
-the partition — add one if you need a fixed CPU model for timing comparisons.
+(`--mem`, `--time`, `--partition`, `--constraint`) to your site; the paper's
+runs used 10 GB and one thread per job on Gold5222 nodes. Keep a `--constraint`
+for production runs: the anytime algorithms (CP, IR, LADMM) spend a fixed wall
+clock budget, so on a slower node they complete fewer rounds and return weaker
+bounds — the results stop being comparable across jobs and against the paper.
 
 ## Reproducing the paper's tables
 

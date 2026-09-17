@@ -4,7 +4,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=10G
 #SBATCH --time=05:58:00
-#SBATCH --partition=small
+#SBATCH --partition=opt_int
+#SBATCH --constraint=Gold5222 # the paper reports Gold 5122
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 #
