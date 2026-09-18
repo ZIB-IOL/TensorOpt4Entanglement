@@ -54,7 +54,13 @@ function threshold_!(problem::Problem, param::Param, effortlevel = 0)
    if isnothing(status) || !(status == RelaxFeasible || status == RelaxOptimal || status == RelaxInfeasible)
       stateseparator.status = StateSeparatorNotFinished
       print("nonvalid status ", solverstatus, " ", status, "\n")
-      return
+      # Return the same four values as every other exit. A bare return yields
+      # nothing, and the caller destructures the result into four names, so it
+      # died with "no method matching iterate(::Nothing)" instead of handling
+      # a solve that did not converge. With the bounds as they stand the caller
+      # sees no improving state and stops the round cleanly.
+      return stateseparator.primalbd, stateseparator.dualbd,
+             stateseparator.primalHbar, stateseparator.primalsol
    end
    return sol.dualobj
 end
@@ -94,7 +100,8 @@ function separate_!(problem::Problem, param::Param, effortlevel = 0, globalobbt 
       isfeasible = BoundTighten(stateseparator, rootnode, globalobbt)
       if !isfeasible
          stateseparator.dualbd  = stateseparator.primalbd
-         return
+         return stateseparator.primalbd, stateseparator.dualbd,
+                stateseparator.primalHbar, stateseparator.primalsol
       end
       if globalobbt
          problem.globalZBs = rootnode.ZBs
@@ -125,7 +132,8 @@ function separate_!(problem::Problem, param::Param, effortlevel = 0, globalobbt 
          if isnothing(status) || !(status == RelaxFeasible || status == RelaxOptimal || status == RelaxInfeasible)
             stateseparator.status = StateSeparatorNotFinished
             print("nonvalid status ", solverstatus, " ", status, "\n")
-            return
+            return stateseparator.primalbd, stateseparator.dualbd,
+                   stateseparator.primalHbar, stateseparator.primalsol
          end
          # prune by infeasiblity
          if status == RelaxInfeasible
