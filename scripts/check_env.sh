@@ -105,19 +105,34 @@ else
     esac
 fi
 
-# We never set MOSEKBINDIR -- Mosek.jl fetches its own solver. One left over in
-# the environment overrides that, and the build fails outright when it does not
-# match Mosek.jl's version.
+# MOSEKBINDIR selects the solver Mosek.jl builds against. The Manifest pins
+# MOSEK 10.2, which recent glibc refuse to dlopen unless its executable-stack
+# marking has been cleared, so on such a machine this must point at a patched
+# copy (scripts/fix_execstack.py). Mosek.jl's build runs <dir>/mosek to read
+# the version and rejects anything that is not its own major.minor.
+want=$(grep -A5 '^\[\[deps.Mosek\]\]$' Manifest.toml 2>/dev/null \
+       | grep '^version' | head -1 | cut -d'"' -f2 | cut -d. -f1,2)
 if [[ -n "${MOSEKBINDIR:-}" ]]; then
-    want=$(grep -A5 '^\[\[deps.Mosek\]\]$' Manifest.toml 2>/dev/null \
-           | grep '^version' | head -1 | cut -d'"' -f2 | cut -d. -f1,2)
-    got=$("$MOSEKBINDIR/mosek" 2>/dev/null | grep -oE 'MOSEK Version [0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
-    if [[ -n "$want" && "$got" != "$want" ]]; then
-        fail "MOSEKBINDIR is set to ${MOSEKBINDIR} (MOSEK ${got:-unreadable}), but Mosek.jl needs $want;
-        its build will reject it. This project sets no MOSEKBINDIR -- run: unset MOSEKBINDIR"
+    if [[ ! -x "$MOSEKBINDIR/mosek" ]]; then
+        fail "MOSEKBINDIR=$MOSEKBINDIR has no runnable 'mosek'; Mosek.jl's build reads
+        the version by running it and will reject the directory"
     else
-        note "MOSEKBINDIR is set ($MOSEKBINDIR); Mosek.jl will use it instead of its own copy"
+        got=$("$MOSEKBINDIR/mosek" 2>/dev/null | grep -oE 'MOSEK Version [0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
+        if [[ -z "$got" ]]; then
+            fail "MOSEKBINDIR=$MOSEKBINDIR: '$MOSEKBINDIR/mosek' ran but printed no version.
+        Run it by hand to see why; without LD_LIBRARY_PATH it often cannot find its
+        sibling libraries: export LD_LIBRARY_PATH=\"\$MOSEKBINDIR:\$LD_LIBRARY_PATH\""
+        elif [[ -n "$want" && "$got" != "$want" ]]; then
+            fail "MOSEKBINDIR=$MOSEKBINDIR is MOSEK $got, but the Manifest pins $want;
+        Mosek.jl's build accepts no other version"
+        else
+            pass "MOSEKBINDIR: MOSEK $got, matching the Manifest"
+        fi
     fi
+elif [[ "$want" == "10.2" ]]; then
+    note "MOSEKBINDIR unset. MOSEK 10.2 is refused by recent glibc unless patched:
+        python3 scripts/fix_execstack.py --src /path/to/mosek/10.2/.../bin
+        export MOSEKBINDIR=\$PWD/.mosek_bin"
 fi
 
 # A MOSEK path in a shell profile comes back on the next login and breaks the
