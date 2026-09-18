@@ -1,4 +1,5 @@
 .julia_depot/
+.mosek_bin/
 outputs/
 __pycache__/
 *.pyc
