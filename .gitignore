@@ -1,4 +1,8 @@
 .julia_depot/
+# patched copy of the MOSEK libraries (scripts/fix_execstack.py) -- machine
+# specific and ~50 MiB. Both forms: a trailing slash matches directories only,
+# and a symlink of the same name would otherwise slip through.
+.mosek_bin
 .mosek_bin/
 outputs/
 __pycache__/
