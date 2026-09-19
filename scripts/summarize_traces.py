@@ -103,9 +103,12 @@ def main():
             dat = os.path.join(args.out, f"{name}_{algo}_{kind}.dat")
             with open(dat, "w") as fh:
                 cols = list(rows[0].keys())
-                fh.write("# " + " ".join(cols) + "\n")
-                for r in rows:
-                    vals = []
+                # `iter` restarts at 0 on every cutting-plane call, and IR makes
+                # several per run -- plotting against it folds the passes on top
+                # of each other. `step` counts rows, so it is monotone.
+                fh.write("# step " + " ".join(cols) + "\n")
+                for step, r in enumerate(rows):
+                    vals = [str(step)]
                     for c in cols:
                         v = r[c]
                         # pgfplots skips non-finite points rather than drawing them

@@ -12,11 +12,18 @@ Produced by: scripts/exp_main.sh (it records the trajectories)
 """
 import sys
 
-from .common import escape, label_of, load_trace_means
+from .common import escape, label_of, load_trace_means, wrap_table
 
 ROWS = [("CP", "CP", True), ("IR", "IR", True)]
 
-TABLES = {"m5cp": dict(m=5, rows=ROWS, experiment="exp_main.sh")}
+SPEC = "{l|lccc}"
+HEAD = (r"    \textbf{State} & \textbf{Algorithm} & $\ub_{\relx}$ & "
+        r"$\lb_{\relx}$ & $\underbar{b}$   \\")
+CAPTION = (r"Average results on gap-closing CP iterations for $m=5$. Italics as "
+           r"in \Cref{tab.m3}.")
+
+TABLES = {"m5cp": dict(m=5, rows=ROWS, experiment="exp_main.sh",
+                       label="tab.m5CP", caption=CAPTION)}
 
 
 def build(name, spec, ctx):
@@ -36,4 +43,5 @@ def build(name, spec, ctx):
     if missing:
         print(f"WARNING: {missing} row(s) have no gap-closing trace; "
               f"run scripts/exp_main.sh (it records the CP trajectories)", file=sys.stderr)
-    return "\n".join(out)
+    return wrap_table("\n".join(out), SPEC, HEAD, spec["caption"], spec["label"],
+                      toprule=r"\midrule")

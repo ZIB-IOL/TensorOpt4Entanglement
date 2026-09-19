@@ -1,0 +1,10 @@
+# Results of the external PDGR method (liu2025unified, FrankWolfe.jl), which
+# this repository does not run. Transcribed from the values reported with the
+# paper so the table generator can place and bold them alongside our own runs.
+# A dash in the source is recorded as an empty field.
+instance,ub_relx,lb_relx,time
+GHZ_3,0.80002,0.79659,
+Dicke_3_1,0.82208,0.81856,
+GHZ_4,0.88901,0.87751,
+Dicke_4_1,0.90757,0.89450,
+Dicke_4_2,0.91439,0.90211,266
