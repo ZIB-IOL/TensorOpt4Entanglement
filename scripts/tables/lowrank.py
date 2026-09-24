@@ -10,7 +10,7 @@ from .common import bounds_block, wrap_table, BOUNDS_SPEC, BOUNDS_HEAD
 ROWS = [(f"LADMM_{r}", f"LADMM\\_{r}", True)
         for r in (400, 500, 600, 700, 800, 900)]
 
-CAPTION = (r"Results of low-rank approximations for LADMM for $m=5$. Italics as "
+CAPTION = (r"Results of low-rank approximations for LADMM for $m=5$. Underlining as "
            r"in \Cref{tab.m3}; the suffix gives the factorization size $r$.")
 
 TABLES = {"m5low": dict(m=5, rows=ROWS, experiment="exp_lowrank.sh",

@@ -1,43 +1,97 @@
-"""Per-level memory (tab.mem3/4/5).
+"""Peak memory per algorithm (tab.mem).
 
-Answers "estimate the memory requirements". Memory is attributed to each
-algorithmic level rather than only the process total. The phases NEST --
-:total contains :cp, which contains the :lmo calls it makes -- so the figures
-are inclusive, and :lmo is reported separately (with its call count) so its
-share is visible.
-
-Columns: total, CP, LMO (calls), LADMM allocation in GiB, then peak RSS in MiB.
+Answers the referee's "estimate of the memory requirements for each ... like
+NNZ, file size, literal memory usage or something". One row per algorithm and
+one column per subsystem count, reporting the worst case over the instances of
+that size, so the whole answer is a single small float rather than one table
+per m. The root-relaxation sizes (variables, constraints, nonzeros, CBF bytes)
+are folded into the caption, since they depend only on m and not on the state.
 
 Produced by: scripts/exp_main.sh
 """
+import math
 import sys
 
-from .common import escape, label_of, load_result
+from .common import ROOT, label_of, load_result, wrap_table
 from .main import ROWS
 
-TABLES = {f"mem{m}": dict(m=m, rows=ROWS, experiment="exp_main.sh") for m in (3, 4, 5)}
+SPEC = "{l|rrr|r}"
+HEAD = (r"    \textbf{Algorithm} & $m=3$ & $m=4$ & $m=5$ & \textbf{SGM} \\")
+SIZES = (3, 4, 5)
+SHIFT = 1.0   # GiB; the ranking is unchanged for shifts 0 to 10
+
+TABLES = {"mem": dict(m=None, rows=ROWS, experiment="exp_main.sh",
+                      label="tab.mem", caption=None)}
+
+
+def _peak(ctx, m, algo):
+    """Worst-case peak RSS in GiB over the instances with this subsystem count."""
+    vals = []
+    for state in ctx.states(m):
+        r = load_result(ctx.result_dirs, state, algo)
+        v = (r or {}).get("peak_rss_mib")
+        if v:
+            vals.append(v / 1024.0)
+    return max(vals) if vals else None
+
+
+def _all_peaks(ctx, algo):
+    """Peak RSS in GiB on every instance, any size."""
+    out = []
+    for m in SIZES:
+        for state in ctx.states(m):
+            v = (load_result(ctx.result_dirs, state, algo) or {}).get("peak_rss_mib")
+            if v:
+                out.append(v / 1024.0)
+    return out
+
+
+def _sgm(vals, shift=SHIFT):
+    """Shifted geometric mean, the usual benchmarking summary."""
+    if not vals:
+        return None
+    return math.exp(sum(math.log(v + shift) for v in vals) / len(vals)) - shift
+
+
+def _relax_note(ctx):
+    """The largest root relaxation, for the caption."""
+    best = None
+    for state in ctx.states(max(SIZES)):
+        r = load_result(ctx.result_dirs, state, "DDPS+")
+        if r and r.get("relax_nvars"):
+            key = r["relax_nnz"]
+            if best is None or key > best[2]:
+                best = (r["relax_nvars"], r["relax_ncons"], r["relax_nnz"],
+                        r["relax_cbf_bytes"] / 2**20)
+    if best is None:
+        return ""
+    v, c, nz, mb = best
+    return (f" The sBB root relaxation of DDPS+ has at most ${v}$ variables, "
+            f"${c}$ constraints and ${nz/1e4:.1f}\\times10^4$ nonzeros "
+            f"(${mb:.2f}$\\,MB in CBF) at $m={max(SIZES)}$.")
 
 
 def build(name, spec, ctx):
     out, missing = [], 0
-    g = lambda r, k: "-" if r.get(k) is None else f"{r[k]:.2f}"
-    for state in ctx.states(spec["m"]):
-        out.append("\\midrule")
-        out.append(f"\\multirow{{{len(spec['rows'])}}}{{*}}{{{escape(ctx.name(state))}}}")
-        for algo, text, emph in spec["rows"]:
-            shown = label_of(algo, text, emph)
-            r = load_result(ctx.result_dirs, state, algo)
-            if r is None or r.get("mem_total_alloc_gib") is None:
-                out.append(f" & {shown} & N/A & N/A & N/A & N/A & N/A \\\\")
+    for algo, text, emph in spec["rows"]:
+        cells = []
+        for m in SIZES:
+            p = _peak(ctx, m, algo)
+            if p is None:
                 missing += 1
-                continue
-            calls = "-" if r.get("mem_lmo_calls") in (None, 0) else str(r["mem_lmo_calls"])
-            rss = "-" if r.get("mem_total_peak_rss_mib") is None else f"{r['mem_total_peak_rss_mib']:.0f}"
-            out.append(f" & {shown} & {g(r,'mem_total_alloc_gib')} & {g(r,'mem_cp_alloc_gib')} & "
-                       f"{g(r,'mem_lmo_alloc_gib')} ({calls}) & {g(r,'mem_ladmm_alloc_gib')} & {rss} \\\\")
+                cells.append("-")
+            else:
+                cells.append(f"{p:.1f}")
+        g = _sgm(_all_peaks(ctx, algo))
+        cells.append("-" if g is None else f"{g:.2f}")
+        out.append(f" {label_of(algo, text, emph)} & " + " & ".join(cells) + r" \\")
     out.append("\\bottomrule")
     if missing:
-        print(f"WARNING: {missing} row(s) have no memory diagnostics; those results "
+        print(f"WARNING: {missing} cell(s) have no memory diagnostics; those results "
               f"predate the instrumentation -- re-run scripts/exp_main.sh --force",
               file=sys.stderr)
-    return "\n".join(out)
+    caption = (r"\lid{Peak resident memory in GiB, worst case over the instances of "
+               r"each size; SGM is the shifted geometric mean (shift $1$\,GiB) over all "
+               r"eleven instances." + _relax_note(ctx) +
+               r" Underlining as in \Cref{tab.m3}.}")
+    return wrap_table("\n".join(out), SPEC, HEAD, caption, spec["label"])

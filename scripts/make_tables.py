@@ -35,7 +35,9 @@ from tables.common import (ROOT, RESULT_DIRS, TRACE_DIRS, PROVENANCE, Context,
 def build(name, ctx):
     """Dispatch one table to the module that owns it."""
     mod, spec = tables.REGISTRY[name]
-    if not ctx.states(spec["m"]):
+    # spec["m"] is None for tables that span every size and select instances
+    # themselves, so there is nothing to check for those.
+    if spec["m"] is not None and not ctx.states(spec["m"]):
         print(f"WARNING: no instances with N = {spec['m']}", file=sys.stderr)
     return mod.build(name, spec, ctx)
 

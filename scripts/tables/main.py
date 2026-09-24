@@ -15,10 +15,10 @@ from .common import bounds_block, wrap_table, BOUNDS_SPEC, BOUNDS_HEAD
 ROWS = [("Alt-SDP", "Alt-SDP", False), ("LADMM", "LADMM", True), ("CP", "CP", True),
         ("IR", "IR", True), ("DPS", "DPS", False), ("DDPS+", "DDPS+", True)]
 
-CAP3 = (r"Experimental results for $m=3$. \lid{Algorithms with \emph{underline} "
-        r"are developed or adapted in this paper; the others are existing methods "
+CAP3 = (r"Experimental results for $m=3$. \lid{Underlined algorithms are "
+        r"developed or adapted in this paper; the others are existing methods "
         r"used as baselines.}")
-CAP = r"Experimental results for $m=%d$. Italics as in \Cref{tab.m3}."
+CAP = r"Experimental results for $m=%d$. Underlining as in \Cref{tab.m3}."
 
 TABLES = {
     "m3": dict(m=3, rows=ROWS, experiment="exp_main.sh",

@@ -10,9 +10,12 @@ Each module in this package owns one family of tables and exposes:
 instances. `make_tables.py` discovers the modules listed in `MODULES` and
 dispatches by table name.
 """
-from . import common, main, lowrank, gapclosing, ddps, memory, size
+from . import common, main, lowrank, gapclosing, ddps, memory
 
-MODULES = (main, lowrank, gapclosing, ddps, memory, size)
+# size.py is retained for reference but no longer registered: its numbers
+# are summarised in the caption of tab.mem, so the per-m tables it emitted
+# were never cited by the paper.
+MODULES = (main, lowrank, gapclosing, ddps, memory)
 
 # table name -> (owning module, spec)
 REGISTRY = {}

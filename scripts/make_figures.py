@@ -143,6 +143,56 @@ profile of $\\lb_{{\\relx}}$. Abbreviations and findings in
 
 
 # --------------------------------------------------------------------------
+def last_run(rows):
+    """Keep only the final run in a trace.
+
+    A re-run appends to the existing file instead of replacing it, so a trace
+    can hold several complete runs back to back. Within one run `is_last` only
+    ever goes false->true and the state pool only grows between CP calls, so a
+    row that resets `iter` to 0 *and* returns the pool to its opening size
+    starts a new run. The tables report the final run, so the figure must too.
+    """
+    if not rows:
+        return rows
+    opening = rows[0].get("n_states")
+    starts = [0] + [i for i, r in enumerate(rows)
+                    if i and r.get("iter", "1").strip() in ("0", "0.0")
+                    and r.get("n_states") == opening]
+    return rows[starts[-1]:]
+
+
+def running_min(pts):
+    """The bound actually held after each iteration. Every CP call reopens from
+    the trivial bound, which would draw as a jump back to 1; the running minimum
+    is what the algorithm reports as glbub."""
+    best = math.inf
+    for s, v in pts:
+        best = min(best, v)
+        yield s, best
+
+
+def decimate(pts, every=8, tol=1e-4):
+    """Thin a monotone curve without rounding off its corners: keep the shoulder
+    on either side of any real move, and a point at least every `every` steps,
+    so a one-iteration cliff still draws as a cliff."""
+    out, prev, last = [], None, None
+    for p in pts:
+        if last is None:
+            out.append(p)
+            last = p
+        else:
+            drop = last[1] - p[1] >= tol
+            if drop and prev is not None and prev != last:
+                out.append(prev)
+            if drop or p[0] - last[0] >= every:
+                out.append(p)
+                last = p
+        prev = p
+    if prev is not None and prev != last:
+        out.append(prev)
+    return out
+
+
 def fig_convergence(out, data, m=5):
     inst = load_instances(os.path.join(ROOT, "benchmark"))
     tdir = os.path.join(ROOT, "results", "main", "traces")
@@ -150,68 +200,85 @@ def fig_convergence(out, data, m=5):
     for st, (name, mm) in sorted(inst.items(), key=lambda kv: display_name(kv[1][0])):
         if mm != m:
             continue
-        series = {}
+        series, restarts = {}, []
         for algo in ("CP", "IR"):
             src = os.path.join(tdir, f"{st}_{algo}.cp.csv")
             if not os.path.isfile(src):
                 continue
-            pts = []
+            pts, bounds = [], []
             with open(src) as fh:
-                for step, r in enumerate(csv.DictReader(fh)):
+                for step, r in enumerate(last_run(list(csv.DictReader(fh)))):
                     try:
                         v = float(r["ub_relx"])
                     except (KeyError, ValueError):
                         continue
-                    if math.isfinite(v):
-                        pts.append((step, v))
+                    if not math.isfinite(v):
+                        continue
+                    # `iter` restarts at 0 on every CP call. CP makes one; IR
+                    # makes several, each opened by a LADMM solve that re-seeds
+                    # the state pool. Index the axis by row so a panel reads as
+                    # one continuous run, and keep those boundaries to draw --
+                    # they are what the shape of the IR curve is explained by.
+                    if step and float(r.get("iter", 1)) == 0:
+                        bounds.append(step)
+                    pts.append((step, v))
             if not pts:
                 continue
-            # Two corrections to the raw trace. `iter` restarts on every CP
-            # call, so index by row. And IR makes several such calls, each
-            # opening from a trivial bound, which draws as a jump back to 1;
-            # the bound the algorithm actually holds is the running minimum,
-            # which is also what glbub reports, so plot that.
+            if algo == "IR":
+                restarts = bounds
             dst = f"conv_{name}_{algo}.dat"
-            best = math.inf
+            curve = decimate(list(running_min(pts)))
             with open(os.path.join(data, dst), "w") as fh:
                 fh.write("# step best_ub_relx\n")
-                for s, v in pts:
-                    best = min(best, v)
-                    fh.write(f"{s} {best:.9f}\n")
-            series[algo] = (dst, best)
+                for s, v in curve:
+                    fh.write(f"{s} {v:.9f}\n")
+            series[algo] = (dst, curve[-1][1])
         if series:
-            panels.append((name, series))
+            panels.append((name, series, restarts))
 
-    lo = min(v for _, s in panels for _, v in s.values()) - 0.004
+    lo, hi = min(b for _, s, _ in panels for _, b in s.values()) - 0.004, 1.005
     body = []
-    for k, (name, s) in enumerate(panels):
-        plots = "\n".join(
-            f"\\addplot[{c}{st}] table[x index=0, y index=1, each nth point=8] {{plots/{f}}};"
-            for (algo, (f, _)), c, st in zip(sorted(s.items()),
-                                             ("sOne", "sTwo"), ("", ", dashed")))
+    for k, (name, s, restarts) in enumerate(panels):
+        plots = [f"\\addplot[{c}{st}, mark=none, line width=0.9pt] "
+                 f"table[x index=0, y index=1] {{plots/{f}}};"
+                 for (_, (f, _)), c, st in zip(sorted(s.items()),
+                                               ("sOne", "sTwo"), (", dashed", ""))]
+        plots += ["\\addplot[black!55, densely dotted, line width=0.8pt, mark=none] "
+                  f"coordinates {{({x},{lo:.3f}) ({x},{hi})}};" for x in restarts]
+        # A three-entry legend is half the height of a 3.9cm panel and there is
+        # nowhere inside one it does not cross a curve, so it is drawn once for
+        # the figure. Label the outer axes only, as small multiples usually do.
         body.append(
             f"\\begin{{subfigure}}{{0.49\\textwidth}}\\centering\n"
             f"\\begin{{tikzpicture}}\\begin{{axis}}[vizbase, width=\\textwidth, height=3.9cm,\n"
             f"  title={{\\footnotesize {display_name(name).replace(chr(95), chr(92) + chr(95))}}},\n"
-            f"  xlabel={{cutting-plane iteration}}, ylabel={{$\\ub_{{\\relx}}$}},\n"
-            f"  xmin=0, ymin={lo:.3f}, ymax=1.005,\n"
-            f"  scaled x ticks=false, /pgf/number format/1000 sep={{}},\n"
-            f"  legend style={{at={{(0.97,0.95)}}, anchor=north east, legend columns=1}},\n"
-            f"  every axis plot/.append style={{mark=none, line width=0.9pt}},\n]\n"
-            f"{plots}\n\\legend{{CP, IR}}\n"
+            + ("  xlabel={cutting-plane iteration},\n" if k >= len(panels) - 2 else "")
+            + ("  ylabel={$\\ub_{\\relx}$},\n" if k % 2 == 0 else "")
+            + f"  xmin=0, ymin={lo:.3f}, ymax={hi},\n"
+            f"  scaled x ticks=false, /pgf/number format/1000 sep={{}},\n]\n"
+            + "\n".join(plots) + "\n"
             f"\\end{{axis}}\\end{{tikzpicture}}\n\\end{{subfigure}}")
 
+    key = ("\\begin{tikzpicture}[baseline]\n"
+           "\\draw[sOne, dashed, line width=0.9pt] (0,0) -- (0.42,0);\n"
+           "\\node[anchor=west, font=\\scriptsize, inner sep=1.5pt] at (0.42,0) {CP};\n"
+           "\\draw[sTwo, line width=0.9pt] (1.25,0) -- (1.67,0);\n"
+           "\\node[anchor=west, font=\\scriptsize, inner sep=1.5pt] at (1.67,0) {IR};\n"
+           "\\draw[black!55, densely dotted, line width=0.8pt] (2.4,-0.16) -- (2.4,0.16);\n"
+           "\\node[anchor=west, font=\\scriptsize, inner sep=1.5pt] at (2.44,0) "
+           "{LADMM restart};\n\\end{tikzpicture}")
     tex = ("% generated by scripts/make_figures.py -- do not edit by hand\n"
            "\\begin{figure}[tbp]\n\\centering\n" + PREAMBLE + colours() + "\n"
+           + key + "\n\n\\vspace{0.4em}\n\n"
            # pair the panels two per row; rstrip() takes a character set, not a
            # suffix, so the separator is placed between panels rather than
            # appended and trimmed
            + "\n".join(p + (r"\hfill" if i % 2 == 0 else "\n\n\\vspace{0.6em}\n")
                         if i < len(body) - 1 else p
                         for i, p in enumerate(body)) + "\n"
-           "\\caption{\\lid{check: Best upper bound $\\ub_{\\relx}$ found so far, against\n"
-           "cutting-plane iteration, for the $m=5$ instances under the common\n"
-           "three-hour limit. Findings in \\Cref{sec.hard}.}}\n"
+           "\\caption{\\lid{check: Best $\\ub_{\\relx}$ so far against cumulative\n"
+           "cutting-plane iteration, $m=5$, under the common three-hour limit. Dotted\n"
+           "vertical lines mark IR's LADMM restarts. Findings in \\Cref{sec.hard}.}}\n"
            "\\label{fig.conv.m5}\n\\end{figure}\n")
     p = os.path.join(out, "fig_convergence.tex")
     open(p, "w").write(tex)

@@ -19,7 +19,7 @@ ROWS = [("CP", "CP", True), ("IR", "IR", True)]
 SPEC = "{l|lccc}"
 HEAD = (r"    \textbf{State} & \textbf{Algorithm} & $\ub_{\relx}$ & "
         r"$\lb_{\relx}$ & $\underbar{b}$   \\")
-CAPTION = (r"Average results on gap-closing CP iterations for $m=5$. Italics as "
+CAPTION = (r"Average results on gap-closing CP iterations for $m=5$. Underlining as "
            r"in \Cref{tab.m3}.")
 
 TABLES = {"m5cp": dict(m=5, rows=ROWS, experiment="exp_main.sh",
