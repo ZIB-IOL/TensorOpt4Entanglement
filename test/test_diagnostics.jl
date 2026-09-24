@@ -32,9 +32,11 @@ const E = ExactEntanglement
         @test Param().relaxation === :ddpsplus
         dims = [2, 2, 2]; d = prod(dims)
         s = E.relaxationStats(Matrix(Diagonal(ones(d))) / d, zeros(d, d), dims, Param(log_level = 0))
-        # pinned: the root relaxation for 3 qubits
+        # pinned: the root relaxation for 3 qubits. DDPS is now PPT plus
+        # partial-trace consistency, DDPS+ adds the scalar McCormick cuts; the
+        # tensor McCormick PSD cuts are no longer part of either mode.
         @test s.nvars == 92
-        @test s.ncons == 1040
+        @test s.ncons == 1036
     end
 
     @testset "peak RSS is reported" begin

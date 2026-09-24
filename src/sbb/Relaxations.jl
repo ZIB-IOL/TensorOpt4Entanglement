@@ -323,24 +323,66 @@ function addComplexMcCormickConstraints(stateseparator::StateSeparator, optmodel
 end
 
 """
+    addPPTConstraints(stateseparator, optmodel, focusnode)
+
+Positive partial transpose at every internal node of the dichotomy tree. This is
+the `dps_l` membership of the DDPS system (paper eq.dmmr); at the first level the
+symmetric extension is the state itself and the symmetry and partial-trace
+conditions are vacuous, so the constraint reduces to `T_B(Z_k) >= 0` across the
+split into the node's two children.
+
+For a Hermitian `Z = R + iI` stored as the real block `[R I; -I R]`, the partial
+transpose swaps the B-indices of BOTH blocks: `R^{T_B}` stays symmetric and
+`I^{T_B}` stays skew-symmetric, so the transposed block is PSD-constrained in the
+same real form.
+"""
+function addPPTConstraints(stateseparator::StateSeparator, optmodel::OptModel, focusnode::Node)
+    model = optmodel.model
+    BST = stateseparator.problem.BST
+    ZRs = optmodel.Zs[:RE]
+    ZIs = optmodel.Zs[:IM]
+    Zdims = stateseparator.problem.Zdims
+
+    function addNodePPT(sys, leftsys, rightsys, retleft, retright)
+        if sys.sysid == -1
+            Zind = sys.Zind
+            dA = Zdims[leftsys.Zind]
+            dB = Zdims[rightsys.Zind]
+            n = dA * dB
+            R, Im = ZRs[Zind], ZIs[Zind]
+            lin(a, b) = (a - 1) * dB + b
+            rowA(i) = cld(i, dB)
+            rowB(i) = ((i - 1) % dB) + 1
+            TR = [R[lin(rowA(i), rowB(j)), lin(rowA(j), rowB(i))] for i in 1:n, j in 1:n]
+            TI = [Im[lin(rowA(i), rowB(j)), lin(rowA(j), rowB(i))] for i in 1:n, j in 1:n]
+            @constraint(model, [TR TI; -TI TR] in PSDCone())
+        end
+        return nothing
+    end
+    traverseDPSBST(1, BST, addNodePPT)
+end
+
+"""
     strengthenRelaxation(stateseparator, optmodel, focusnode)
 
 Tighten a base relaxation with the valid inequalities of the paper. Which ones
 are added depends on `param.relaxation`:
 
-  `:ddps`     node bounds and partial-trace consistency between a node and its
-              children -- the DDPS outer approximation on its own
-  `:ddpsplus` the above plus the tensor McCormick PSD cuts and the scalar
-              complex McCormick cuts
+  `:ddps`     PPT and partial-trace consistency at every parent/child split of
+              the dichotomy tree, plus the node bounds -- the DDPS outer
+              approximation on its own
+  `:ddpsplus` the above plus the scalar complex McCormick cuts
 
-The `:ddpsplus` path adds constraints in exactly the order it always has, so
-that mode is unchanged by the introduction of `:ddps`.
+The tensor McCormick PSD cuts (`addTensorMcCormickConstraints`, paper eq.psd)
+are no longer part of either mode: with PPT present they were measured to be
+redundant at the root, while costing three PSD blocks of size 2*dA*dB per node.
+The function is retained so the cuts can be re-enabled for comparison.
 """
 function strengthenRelaxation(stateseparator::StateSeparator, optmodel::OptModel, focusnode::Node)
     plus = stateseparator.param.relaxation === :ddpsplus
     applyBounds(stateseparator, optmodel, focusnode)
+    addPPTConstraints(stateseparator, optmodel, focusnode)
     if plus
-        addTensorMcCormickConstraints(stateseparator, optmodel, focusnode)
         addComplexMcCormickConstraints(stateseparator, optmodel, focusnode)
     end
     addPartialTraceConstraints(stateseparator, optmodel, focusnode)

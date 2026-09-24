@@ -311,7 +311,11 @@ function solveDPS(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64},
     bipartition, level = config[dims]
     val, _ = Ket.entanglement_robustness(Matrix(ρ), bipartition, level;
                                          noise = "white", ppt = true, inner = false, verbose = true)
-    return val / dimH
+    # Ket minimises λ subject to ρ + λ·Id lying in the DPS cone, with the
+    # UNNORMALISED identity, so that matrix has trace 1 + λ·dimH. Normalising,
+    #   (ρ + λ Id)/(1 + λ d) = (1/(1+λd))·ρ + (λd/(1+λd))·(Id/d),
+    # and matching (1-z)·ρ + z·(Id/d) gives the mixing parameter
+    return dimH * val / (1 + dimH * val)
 end
 
 """
