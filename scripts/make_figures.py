@@ -23,7 +23,7 @@ import argparse, csv, math, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tables.common import (ROOT, load_instances, load_result,  # noqa: E402
-                           display_name)
+                           display_name, load_pdgr)
 
 PALETTE = [("sOne", "2A78D6"), ("sTwo", "EB6834"),
            ("sThree", "4A3AA7"), ("sFour", "1BAF7A")]
@@ -65,7 +65,14 @@ def fig_bounds(out, data):
     # display name -- the caption says the figure follows the tables, so it must
     order = sorted(inst.items(), key=lambda kv: (kv[1][1], display_name(kv[1][0])))
     dirs = [os.path.join(ROOT, "results", "main")]
-    rows, labels = [], []
+    pdgr = load_pdgr()
+
+    # DPS and DDPS+ now return the same bound on every instance (the corrected
+    # DPS conversion coincides with the PPT level that DDPS imposes at the root),
+    # so they share one series; plotting both would hide one marker under the
+    # other. PDGR holds the best bound on three instances and gets its own
+    # series, on the instances where it ran.
+    rows, labels, pdgr_pts = [], [], []
     for st, (name, m) in order:
         g = lambda a, k: (load_result(dirs, st, a) or {}).get(k)
         ubs = [v for v in (g("Alt-SDP", "glbub"), g("CP", "glbub"), g("IR", "glbub"))
@@ -74,21 +81,65 @@ def fig_bounds(out, data):
         lbs = {a: v for a, v in lbs.items() if v is not None and math.isfinite(v)}
         if not ubs or not lbs:
             continue
-        rows.append((len(rows), min(ubs), max(lbs.values()), lbs.get("CP"), lbs.get("DPS")))
+        i = len(rows)
+        rows.append((i, min(ubs), max(lbs.values()), lbs.get("CP")))
         labels.append(short(name))
+        pl = (pdgr.get(display_name(name)) or {}).get("lb")
+        if pl is not None:
+            pdgr_pts.append((i, pl))
     path = os.path.join(data, "bounds_by_instance.dat")
     with open(path, "w") as fh:
-        fh.write("# idx best_ub best_lb cp_lb dps_lb\n")
-        for i, bu, bl, cp, dps in rows:
-            fh.write(f"{i} {bu:.5f} {bl:.5f} {cp:.5f} {dps:.5f}\n")
+        fh.write("# idx best_ub best_lb cp_lb\n")
+        for i, bu, bl, cp in rows:
+            fh.write(f"{i} {bu:.5f} {bl:.5f} {cp:.5f}\n")
+    # separate file: PDGR ran on only five of the instances, and a gap is
+    # cleaner than a sentinel pgfplots has to be told to skip
+    ppdgr = os.path.join(data, "pdgr_by_instance.dat")
+    with open(ppdgr, "w") as fh:
+        fh.write("# idx pdgr_lb\n")
+        for i, v in pdgr_pts:
+            fh.write(f"{i} {v:.5f}\n")
 
-    marks = [("*", 2.3, "sOne"), ("square*", 2.2, "sTwo"),
-             ("triangle*", 2.8, "sThree"), ("diamond*", 2.6, "sFour")]
+    # Dolan-More performance profile of the lower bound: for each method, the
+    # fraction of instances whose bound is within a factor tau of the best bound
+    # any method attained. PDGR is included, so the reference really is the best
+    # bound known; the instances it did not run on count as failures, which is
+    # what caps its curve. Written in the column order the figure indexes into.
+    profs = ("Alt-SDP", "LADMM", "CP", "IR", "DPS", "DDPS+", "PDGR")
+    ratios = {a: [] for a in profs}
+    for st, (name, mm) in order:
+        vals = {a: (load_result(dirs, st, a) or {}).get("glblb")
+                for a in profs if a != "PDGR"}
+        vals["PDGR"] = (pdgr.get(display_name(name)) or {}).get("lb")
+        vals = {a: v for a, v in vals.items() if v is not None and math.isfinite(v)}
+        if not vals:
+            continue
+        best = max(vals.values())
+        for a in profs:
+            v = vals.get(a)
+            ratios[a].append(best / v if (v is not None and v > 0 and best > 0) else math.inf)
+    ninst = max((len(v) for v in ratios.values()), default=0)
+    ppath = os.path.join(data, "profile_lb.dat")
+    with open(ppath, "w") as fh:
+        fh.write("# tau " + " ".join(profs) + "\n")
+        t = 1.0
+        while t <= 3.0001:
+            fh.write(f"{t:.3f} " + " ".join(
+                # an exact tie must count for both methods, so compare the ratio
+                # to tau with a relative tolerance rather than exactly
+                f"{sum(1 for r in ratios[a] if r <= t * (1 + 1e-6)) / ninst:.4f}" if ninst else "0.0000"
+                for a in profs) + "\n")
+            t += 0.05
+
+    marks = [("*", 2.3, "sOne"), ("square*", 2.2, "sTwo"), ("triangle*", 2.8, "sThree")]
     series = "\n".join(
         f"\\addplot[only marks, mark={mk}, mark size={sz}pt, {c},\n"
         f"         mark options={{draw=white, line width=0.5pt, fill={c}}}]\n"
         f"  table[x index=0, y index={k}] {{plots/bounds_by_instance.dat}};"
         for k, (mk, sz, c) in enumerate(marks, start=1))
+    series += ("\n\\addplot[only marks, mark=diamond*, mark size=2.6pt, sFour,\n"
+               "         mark options={draw=white, line width=0.5pt, fill=sFour}]\n"
+               "  table[x index=0, y index=1] {plots/pdgr_by_instance.dat};")
 
     tex = f"""% generated by scripts/make_figures.py -- do not edit by hand
 \\begin{{figure}}[tbp]
@@ -103,7 +154,7 @@ def fig_bounds(out, data):
   xticklabel style={{font=\\scriptsize}},
 ]
 {series}
-\\legend{{$\\ub_{{\\relx}}$ (IR), $\\lb_{{\\relx}}$ (DDPS+), $\\lb_{{\\relx}}$ (CP), $\\lb_{{\\relx}}$ (DPS)}}
+\\legend{{best $\\ub_{{\\relx}}$, $\\lb_{{\\relx}}$ (DDPS+ $=$ DPS), $\\lb_{{\\relx}}$ (CP), $\\lb_{{\\relx}}$ (PDGR)}}
 \\end{{axis}}
 \\end{{tikzpicture}}
 \\caption{{}}\\label{{fig.bounds.inst}}
@@ -123,17 +174,18 @@ def fig_bounds(out, data):
 ]
 \\addplot[sTwo]           table[x index=0, y index=6] {{plots/profile_lb.dat}};
 \\addplot[sThree, dashed] table[x index=0, y index=3] {{plots/profile_lb.dat}};
-\\addplot[sFour, dash pattern=on 1pt off 2pt, line width=1.4pt]
+\\addplot[sOne, dash pattern=on 1pt off 2pt, line width=1.4pt]
                          table[x index=0, y index=4] {{plots/profile_lb.dat}};
-\\legend{{DDPS+, CP, IR}}
+\\addplot[sFour, dash pattern=on 4pt off 1.5pt on 1pt off 1.5pt]
+                         table[x index=0, y index=7] {{plots/profile_lb.dat}};
+\\legend{{DDPS+ (=DPS), CP, IR, PDGR}}
 \\end{{axis}}
 \\end{{tikzpicture}}
 \\caption{{}}\\label{{fig.prof.lb}}
 \\end{{subfigure}}
-\\caption{{\\lid{{check: Bounds on the white-noise threshold $\\opt$:
+\\caption{{\\lid{{Upper and Lower Bound:
 \\subref{{fig.bounds.inst}} per instance; \\subref{{fig.prof.lb}} performance
-profile of $\\lb_{{\\relx}}$. Abbreviations and findings in
-\\Cref{{sec.aggregate}}.}}}}
+profile of $\\lb_{{\\relx}}$.}}}}
 \\label{{fig.profiles}}
 \\end{{figure}}
 """
@@ -276,9 +328,8 @@ def fig_convergence(out, data, m=5):
            + "\n".join(p + (r"\hfill" if i % 2 == 0 else "\n\n\\vspace{0.6em}\n")
                         if i < len(body) - 1 else p
                         for i, p in enumerate(body)) + "\n"
-           "\\caption{\\lid{check: Best $\\ub_{\\relx}$ so far against cumulative\n"
-           "cutting-plane iteration, $m=5$, under the common three-hour limit. Dotted\n"
-           "vertical lines mark IR's LADMM restarts. Findings in \\Cref{sec.hard}.}}\n"
+           "\\caption{\\lid{Best $\\ub_{\\relx}$ so far against cumulative\n"
+           "cutting-plane iteration, $m=5$.}}\n"
            "\\label{fig.conv.m5}\n\\end{figure}\n")
     p = os.path.join(out, "fig_convergence.tex")
     open(p, "w").write(tex)

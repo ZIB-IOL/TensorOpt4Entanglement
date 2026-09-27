@@ -53,24 +53,6 @@ def _sgm(vals, shift=SHIFT):
     return math.exp(sum(math.log(v + shift) for v in vals) / len(vals)) - shift
 
 
-def _relax_note(ctx):
-    """The largest root relaxation, for the caption."""
-    best = None
-    for state in ctx.states(max(SIZES)):
-        r = load_result(ctx.result_dirs, state, "DDPS+")
-        if r and r.get("relax_nvars"):
-            key = r["relax_nnz"]
-            if best is None or key > best[2]:
-                best = (r["relax_nvars"], r["relax_ncons"], r["relax_nnz"],
-                        r["relax_cbf_bytes"] / 2**20)
-    if best is None:
-        return ""
-    v, c, nz, mb = best
-    return (f" The sBB root relaxation of DDPS+ has at most ${v}$ variables, "
-            f"${c}$ constraints and ${nz/1e4:.1f}\\times10^4$ nonzeros "
-            f"(${mb:.2f}$\\,MB in CBF) at $m={max(SIZES)}$.")
-
-
 def build(name, spec, ctx):
     out, missing = [], 0
     for algo, text, emph in spec["rows"]:
@@ -90,8 +72,6 @@ def build(name, spec, ctx):
         print(f"WARNING: {missing} cell(s) have no memory diagnostics; those results "
               f"predate the instrumentation -- re-run scripts/exp_main.sh --force",
               file=sys.stderr)
-    caption = (r"\lid{Peak resident memory in GiB, worst case over the instances of "
-               r"each size; SGM is the shifted geometric mean (shift $1$\,GiB) over all "
-               r"eleven instances." + _relax_note(ctx) +
-               r" Underlining as in \Cref{tab.m3}.}")
+    caption = (r"\lid{Peak resident memory in GiB, worst case over the instances "
+               r"of each size.}")
     return wrap_table("\n".join(out), SPEC, HEAD, caption, spec["label"])
