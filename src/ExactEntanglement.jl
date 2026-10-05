@@ -31,6 +31,7 @@ using JuMP
 import MathOptInterface as MOI
 import Mosek
 import Ket as Ket
+import Serialization
 
 # Mosek is an optional runtime dependency: the package must still load (and the
 # pure-Julia heuristics must still run) on a machine without a Mosek licence.
@@ -58,6 +59,7 @@ import ManifoldsBase:
 import Manopt: max_stepsize, get_reason, get_solver_return
 
 # ---- foundations --------------------------------------------------------
+include("../lib/PDGR/PDGR.jl") # adapted EntanglementDetection source
 include("Types.jl")        # Status, Param, run clock
 include("MathUtils.jl")    # index maps, McCormick helpers, small numerics
 include("Solver.jl")       # Mosek setup and result classification
@@ -85,11 +87,12 @@ include("cuttingplane/ThresholdDetector.jl")  # threshold detector + drivers
 include("solvers/LADMM.jl")
 include("solvers/AlternatingSDP.jl")
 include("solvers/DualALM.jl")
+include("solvers/PDGR.jl")
 
 # ---- command-line driver ------------------------------------------------
 include("Drivers.jl")
 
-export Param
+export Param, PDGROptions, solvePDGR
 export runEntangle
 export solveIR, solveCP, solveAltSDP, solveDPS, solveDDPSPlus,
        solveAltSDPCP, solveDualALM

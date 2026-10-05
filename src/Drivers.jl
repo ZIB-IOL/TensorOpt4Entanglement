@@ -111,6 +111,7 @@ off them, so add codes rather than renaming existing ones.
 | `CP`          | standalone cutting plane                              |
 | `IR`          | iterative refinement (LADMM + CP, with lazification)  |
 | `DPS`         | DPS hierarchy lower bound via Ket.jl                  |
+| `PDGR`        | primal-dual geometric reconstruction bounds          |
 | `DDPS+`       | tensor-RLT lower bound at the sBB root                |
 | `DDPS`        | as `DDPS+` with the McCormick families removed        |
 | `CP-DDPS`, `IR-DDPS` | `CP` / `IR` with a DDPS-only oracle            |
@@ -152,6 +153,10 @@ const ALGORITHMS = Dict{String,Function}(
     end,
     "DPS"     => (HR, HI, dims, p) -> (0, solveDPS(HR, HI, dims, p), 0, 0, 0),
     "DDPS+"   => (HR, HI, dims, p) -> (0, solveDDPSPlus(HR, HI, dims, p), 0, 0, 0),
+    "PDGR"    => function (HR, HI, dims, p)
+        result = solvePDGR(HR, HI, dims, p)
+        return result.sep_bound, result.ent_bound, NaN, NaN, NaN
+    end,
 
     # --- variants not given a name in the paper ----------------------------
     "IR-nolazy"  => (HR, HI, dims, p) -> solveIR(HR, HI, dims, p),
@@ -252,7 +257,7 @@ function runEntangle(args)
         println("  ρ size = $(size(data.ρ))")
         println("Parameters:")
         println("  algorithm = $algo")
-        println("  solver = $(param.solver)")
+        println("  solver = $(algo == "PDGR" ? "PDGR (no conic solver)" : param.solver)")
         println("  time_limit = $(param.time_limit)")
         println("  log_level = $(param.log_level)")
         println("  maxrounds = $(param.maxrounds)")
@@ -267,6 +272,9 @@ function runEntangle(args)
     applySizePreset!(param, length(dims), algo)
 
     haskey(ALGORITHMS, algo) || error("unknown algorithm $algo; expected one of $(sort(collect(keys(ALGORITHMS))))")
+
+    # PDGR has its own oracle and certificates; it does not build an sBB model.
+    algo == "PDGR" && return runPDGRBenchmark(args, data, param)
 
     # The oracle relaxation has to be settled before the root relaxation is
     # measured, or the diagnostic describes a model the run never builds: the

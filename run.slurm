@@ -27,10 +27,10 @@
 # JOB_LIST selects the list and is required. runjobs.sh writes one timestamped
 # list per part per invocation under joblists/, so a resubmission never
 # rewrites a list that a pending array is still reading:
-#   JOB_LIST=joblists/main-20250115-120000.txt sbatch --array=1-66 run.slurm
+#   JOB_LIST=joblists/main-20250115-120000.txt sbatch --array=1-77 run.slurm
 #
 # Line format, produced by lib.sh:
-#   <instance> <algorithm> <timelimit> [<results_dir>]
+#   <instance> <algorithm> <timelimit> [<results_dir> [<Julia options>...]]
 # The Julia binary is deliberately NOT in the list: it is a property of the
 # machine, not of the experiment, so set JULIA_BIN here or in the environment.
 # The optional 4th field routes results to that experiment's directory.
@@ -54,7 +54,13 @@ fi
 
 PARAM=$(sed -n "${LINENUM}p" "$JOB_LIST")
 [[ -n "$PARAM" ]] || { echo "line $LINENUM not present in $JOB_LIST" >&2; exit 2; }
-read -r instance algorithm timelimit resultsdir <<< "$PARAM"
+read -r -a job_fields <<< "$PARAM"
+[[ ${#job_fields[@]} -ge 3 ]] || { echo "invalid job line: $PARAM" >&2; exit 2; }
+instance="${job_fields[0]}"
+algorithm="${job_fields[1]}"
+timelimit="${job_fields[2]}"
+resultsdir="${job_fields[3]:-}"
+julia_args=("${job_fields[@]:4}")
 juliabin="${JULIA_BIN:-julia}"
 
 # Context first, so a truncated or killed job still says what it was and where.
@@ -80,10 +86,11 @@ fi
 # same time and they serialise on each other's pidfiles rather than solving.
 # A cache that is missing or stale is then compiled in memory: slower for that
 # job, but no contention and no half-written cache files.
-echo "$juliabin --project=. scripts/run_experiment.jl -s $instance -a $algorithm -t $timelimit"
+echo "$juliabin --project=. scripts/run_experiment.jl -s $instance -a $algorithm -t $timelimit ${julia_args[*]}"
 # unquoted: JULIA_BIN may be a juliaup selector ("julia +1.11.6"), which has to split
 srun $juliabin --compiled-modules=existing --project=. scripts/run_experiment.jl \
      -s "$instance" -a "$algorithm" -t "$timelimit" \
+     "${julia_args[@]}" \
      > "$logfile" 2>&1
 rc=$?
 echo "finished $(date -Is) rc=$rc; julia output in $logfile"

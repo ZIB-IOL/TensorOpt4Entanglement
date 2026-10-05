@@ -9,7 +9,7 @@
 #
 # Reports every problem it finds rather than stopping at the first, and exits
 # non-zero if anything would prevent a run. Safe to run anywhere: it solves one
-# tiny LP but starts no experiment and writes nothing outside a temp file.
+# tiny LP (or a product-state PDGR probe) but starts no benchmark experiment.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -79,7 +79,9 @@ else
                        || fail "cannot create depot $d ($parent not writable)"
 fi
 DEPOT="$d"          # $d is reused below; keep the depot path for later messages
-if [[ -d "$d/packages/Mosek" ]]; then
+if [[ "${EXACTENT_NEEDS_MOSEK:-1}" == "0" ]]; then
+    [[ -f lib/PDGR/PDGR.jl ]] && pass "PDGR source folder present" || fail "lib/PDGR missing"
+elif [[ -d "$d/packages/Mosek" ]]; then
     pass "Mosek package present in the depot"
 else
     note "no Mosek package in $d yet - the first run will install it"
@@ -94,95 +96,113 @@ done
 avail=$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')
 [[ -n "$avail" && "$avail" -ge 5 ]] && pass "${avail} GiB free" || note "only ${avail:-?} GiB free"
 
-echo "== mosek =="
-if [[ -z "${MOSEKLM_LICENSE_FILE:-}" && ! -f "$HOME/mosek/mosek.lic" ]]; then
-    fail "no licence: set MOSEKLM_LICENSE_FILE (a file, or port@host) or place ~/mosek/mosek.lic"
-else
-    src="${MOSEKLM_LICENSE_FILE:-$HOME/mosek/mosek.lic}"
-    case "$src" in
-        *@*) pass "licence server: $src" ;;
-        *)   [[ -r "$src" ]] && pass "licence file: $src" || fail "licence file unreadable: $src" ;;
-    esac
-fi
-
-# MOSEKBINDIR selects the solver Mosek.jl builds against. The Manifest pins
-# MOSEK 10.2, which recent glibc refuse to dlopen unless its executable-stack
-# marking has been cleared, so on such a machine this must point at a patched
-# copy (scripts/fix_execstack.py). Mosek.jl's build runs <dir>/mosek to read
-# the version and rejects anything that is not its own major.minor.
-want=$(grep -A5 '^\[\[deps.Mosek\]\]$' Manifest.toml 2>/dev/null \
-       | grep '^version' | head -1 | cut -d'"' -f2 | cut -d. -f1,2)
-if [[ -n "${MOSEKBINDIR:-}" ]]; then
-    if [[ ! -x "$MOSEKBINDIR/mosek" ]]; then
-        fail "MOSEKBINDIR=$MOSEKBINDIR has no runnable 'mosek'; Mosek.jl's build reads
-        the version by running it and will reject the directory"
+if [[ "${EXACTENT_NEEDS_MOSEK:-1}" == "1" ]]; then
+    echo "== mosek =="
+    if [[ -z "${MOSEKLM_LICENSE_FILE:-}" && ! -f "$HOME/mosek/mosek.lic" ]]; then
+        fail "no licence: set MOSEKLM_LICENSE_FILE (a file, or port@host) or place ~/mosek/mosek.lic"
     else
-        got=$("$MOSEKBINDIR/mosek" 2>/dev/null | grep -oE 'MOSEK Version [0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
-        if [[ -z "$got" ]]; then
-            fail "MOSEKBINDIR=$MOSEKBINDIR: '$MOSEKBINDIR/mosek' ran but printed no version.
-        Run it by hand to see why; without LD_LIBRARY_PATH it often cannot find its
-        sibling libraries: export LD_LIBRARY_PATH=\"\$MOSEKBINDIR:\$LD_LIBRARY_PATH\""
-        elif [[ -n "$want" && "$got" != "$want" ]]; then
-            fail "MOSEKBINDIR=$MOSEKBINDIR is MOSEK $got, but the Manifest pins $want;
-        Mosek.jl's build accepts no other version"
+        src="${MOSEKLM_LICENSE_FILE:-$HOME/mosek/mosek.lic}"
+        case "$src" in
+            *@*) pass "licence server: $src" ;;
+            *)   [[ -r "$src" ]] && pass "licence file: $src" || fail "licence file unreadable: $src" ;;
+        esac
+    fi
+
+    # MOSEKBINDIR selects the solver Mosek.jl builds against. The Manifest pins
+    # MOSEK 10.2, which recent glibc refuse to dlopen unless its executable-stack
+    # marking has been cleared, so on such a machine this must point at a patched
+    # copy (scripts/fix_execstack.py). Mosek.jl's build runs <dir>/mosek to read
+    # the version and rejects anything that is not its own major.minor.
+    want=$(grep -A5 '^\[\[deps.Mosek\]\]$' Manifest.toml 2>/dev/null \
+           | grep '^version' | head -1 | cut -d'"' -f2 | cut -d. -f1,2)
+    if [[ -n "${MOSEKBINDIR:-}" ]]; then
+        if [[ ! -x "$MOSEKBINDIR/mosek" ]]; then
+            fail "MOSEKBINDIR=$MOSEKBINDIR has no runnable 'mosek'; Mosek.jl's build reads
+            the version by running it and will reject the directory"
         else
-            pass "MOSEKBINDIR: MOSEK $got, matching the Manifest"
+            got=$("$MOSEKBINDIR/mosek" 2>/dev/null | grep -oE 'MOSEK Version [0-9]+\.[0-9]+' | head -1 | awk '{print $3}')
+            if [[ -z "$got" ]]; then
+                fail "MOSEKBINDIR=$MOSEKBINDIR: '$MOSEKBINDIR/mosek' ran but printed no version.
+            Run it by hand to see why; without LD_LIBRARY_PATH it often cannot find its
+            sibling libraries: export LD_LIBRARY_PATH=\"\$MOSEKBINDIR:\$LD_LIBRARY_PATH\""
+            elif [[ -n "$want" && "$got" != "$want" ]]; then
+                fail "MOSEKBINDIR=$MOSEKBINDIR is MOSEK $got, but the Manifest pins $want;
+            Mosek.jl's build accepts no other version"
+            else
+                pass "MOSEKBINDIR: MOSEK $got, matching the Manifest"
+            fi
+        fi
+    elif [[ "$want" == "10.2" ]]; then
+        note "MOSEKBINDIR unset. MOSEK 10.2 is refused by recent glibc unless patched:
+            python3 scripts/fix_execstack.py --src /path/to/mosek/10.2/.../bin
+            export MOSEKBINDIR=\$PWD/.mosek_bin"
+    fi
+
+    # A MOSEK path in a shell profile comes back on the next login and breaks the
+    # build again, long after the variable was unset in this shell.
+    for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+        [[ -f "$rc" ]] || continue
+        if grep -qE '^[^#]*\b(MOSEKBINDIR|MOSEKHOME)=' "$rc" 2>/dev/null; then
+            note "$rc sets MOSEKBINDIR/MOSEKHOME; it will return next login and Mosek.jl's
+            build rejects any MOSEK that is not its own version - remove it there"
+        fi
+    done
+
+    echo "== a real solve =="
+    if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
+        # `using` must be a top-level statement of its own: a macro like @variable
+        # inside the same block is resolved before the using has run.
+        probe=$($JULIA_BIN --project=. -e '
+            using JuMP, MosekTools
+            function probe()
+                m = Model(Mosek.Optimizer); set_silent(m)
+                @variable(m, x >= 1.5); @objective(m, Min, x); optimize!(m)
+                return termination_status(m) == OPTIMAL && abs(objective_value(m) - 1.5) < 1e-9
+            end
+            try
+                println(probe() ? "SOLVE_OK" : "SOLVE_WRONG")
+            catch e
+                println("SOLVE_FAIL: ", first(sprint(showerror, e), 200))
+            end' 2>&1)
+        out=$(echo "$probe" | grep -E '^SOLVE_' | tail -1)
+        [[ -n "$out" ]] || out="SOLVE_FAIL: $(echo "$probe" | grep -E 'ERROR|error' | head -1)"
+        case "$out" in
+            SOLVE_OK)   pass "Mosek solved a test LP" ;;
+            SOLVE_FAIL*)
+                msg="${out#SOLVE_FAIL: }"
+                fail "$msg"
+                if [[ "$msg" == *"not properly installed"* ]]; then
+                    printf "        Mosek.jl is installed but never built: Pkg.build writes\n"
+                    printf "        deps/deps.jl, and nothing loads without it. Run:\n"
+                    printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"; verbose=true)'\n"
+                    printf "        the build DOWNLOADS MOSEK, so this machine needs outbound\n"
+                    printf "        internet; the reason it failed is in its build.log:\n"
+                    printf "          %s/scratchspaces/*/*/build.log\n" "${DEPOT:-$HOME/.julia}"
+                elif [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
+                    printf "        Mosek.jl cannot load the solver it built against. Re-fetch it:\n"
+                    printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"); Pkg.precompile()'\n"
+                    printf "        (this downloads MOSEK, so the machine needs outbound internet)\n"
+                fi ;;
+            SOLVE_WRONG) fail "Mosek ran but returned the wrong answer" ;;
+            *)          fail "could not test the solver: $out" ;;
+        esac
+    fi
+else
+    echo "== PDGR probe =="
+    if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
+        probe=$($JULIA_BIN --project=. -e '
+            include("lib/PDGR/PDGR.jl")
+            using .PDGR
+            result = PDGR.solve(ComplexF64[1,0,0,0], (2,2);
+                mode=:sep, max_steps=1, fw_max_iteration=50,
+                lmo_nb=1, lmo_max_iter=10, verbose=0)
+            println(result.sep_bound < 1e-5 ? "PDGR_OK" : "PDGR_FAIL")' 2>&1)
+        if printf '%s\n' "$probe" | grep -qx 'PDGR_OK'; then
+            pass "PDGR certified a product state without MOSEK"
+        else
+            fail "PDGR probe failed: $probe"
         fi
     fi
-elif [[ "$want" == "10.2" ]]; then
-    note "MOSEKBINDIR unset. MOSEK 10.2 is refused by recent glibc unless patched:
-        python3 scripts/fix_execstack.py --src /path/to/mosek/10.2/.../bin
-        export MOSEKBINDIR=\$PWD/.mosek_bin"
-fi
-
-# A MOSEK path in a shell profile comes back on the next login and breaks the
-# build again, long after the variable was unset in this shell.
-for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-    [[ -f "$rc" ]] || continue
-    if grep -qE '^[^#]*\b(MOSEKBINDIR|MOSEKHOME)=' "$rc" 2>/dev/null; then
-        note "$rc sets MOSEKBINDIR/MOSEKHOME; it will return next login and Mosek.jl's
-        build rejects any MOSEK that is not its own version - remove it there"
-    fi
-done
-
-echo "== a real solve =="
-if command -v "${JULIA_BIN%% *}" >/dev/null 2>&1; then
-    # `using` must be a top-level statement of its own: a macro like @variable
-    # inside the same block is resolved before the using has run.
-    probe=$($JULIA_BIN --project=. -e '
-        using JuMP, MosekTools
-        function probe()
-            m = Model(Mosek.Optimizer); set_silent(m)
-            @variable(m, x >= 1.5); @objective(m, Min, x); optimize!(m)
-            return termination_status(m) == OPTIMAL && abs(objective_value(m) - 1.5) < 1e-9
-        end
-        try
-            println(probe() ? "SOLVE_OK" : "SOLVE_WRONG")
-        catch e
-            println("SOLVE_FAIL: ", first(sprint(showerror, e), 200))
-        end' 2>&1)
-    out=$(echo "$probe" | grep -E '^SOLVE_' | tail -1)
-    [[ -n "$out" ]] || out="SOLVE_FAIL: $(echo "$probe" | grep -E 'ERROR|error' | head -1)"
-    case "$out" in
-        SOLVE_OK)   pass "Mosek solved a test LP" ;;
-        SOLVE_FAIL*)
-            msg="${out#SOLVE_FAIL: }"
-            fail "$msg"
-            if [[ "$msg" == *"not properly installed"* ]]; then
-                printf "        Mosek.jl is installed but never built: Pkg.build writes\n"
-                printf "        deps/deps.jl, and nothing loads without it. Run:\n"
-                printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"; verbose=true)'\n"
-                printf "        the build DOWNLOADS MOSEK, so this machine needs outbound\n"
-                printf "        internet; the reason it failed is in its build.log:\n"
-                printf "          %s/scratchspaces/*/*/build.log\n" "${DEPOT:-$HOME/.julia}"
-            elif [[ "$msg" == *libmosek* || "$msg" == *"Unable to load"* ]]; then
-                printf "        Mosek.jl cannot load the solver it built against. Re-fetch it:\n"
-                printf "          julia --project=. -e 'using Pkg; Pkg.build(\"Mosek\"); Pkg.precompile()'\n"
-                printf "        (this downloads MOSEK, so the machine needs outbound internet)\n"
-            fi ;;
-        SOLVE_WRONG) fail "Mosek ran but returned the wrong answer" ;;
-        *)          fail "could not test the solver: $out" ;;
-    esac
 fi
 
 echo "== slurm =="
@@ -203,7 +223,7 @@ if command -v sbatch >/dev/null 2>&1; then
         fi
     fi
     lim=$(scontrol show config 2>/dev/null | grep -oP 'MaxArraySize\s*=\s*\K[0-9]+')
-    [[ -z "$lim" ]] || { [[ $lim -ge 66 ]] && pass "MaxArraySize $lim (need 66)" || fail "MaxArraySize $lim < 66"; }
+    [[ -z "$lim" ]] || { [[ $lim -ge 77 ]] && pass "MaxArraySize $lim (need 77)" || fail "MaxArraySize $lim < 77"; }
 else
     note "no sbatch here - use 'bash runjobs.sh --local' (this is not a cluster node)"
 fi

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # EXPERIMENT 1 of 3 -- the main benchmark.
 #
-# Every instance x the six algorithms compared in the paper, at the paper's
+# Every instance x the seven algorithms compared in the paper, at the paper's
 # per-size time limits (1/2/3 h for m = 3/4/5).
 #
 #   A    Alt-SDP     LD1  LADMM      D    CP
 #   LDL  IR          PPT  DPS        RLT  DDPS+
+#        PDGR
 #
 # This single run is the raw material for five of the paper's tables. It does
 # not overlap with the other two experiments.
@@ -31,7 +32,7 @@ set_part main
 M="${M:-3 4 5}"
 failed=0
 for m in $M; do
-    run_table "main_m${m}" "$m" Alt-SDP LADMM CP IR DPS DDPS+ || failed=$((failed+1))
+    run_table "main_m${m}" "$m" Alt-SDP LADMM CP IR DPS DDPS+ PDGR || failed=$((failed+1))
 done
 [[ $failed -eq 0 ]] || exit 1
 echo

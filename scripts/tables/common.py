@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 # Experiments write into their own directory; results/ itself still holds the
 # flat files published with the paper. Searched in order, first hit wins.
-RESULT_DIRS = [os.path.join(ROOT, "results", p) for p in ("main", "lowrank", "ddps")]
+RESULT_DIRS = [os.path.join(ROOT, "results", p) for p in ("main", "lowrank", "ddps", "pdgr")]
 RESULT_DIRS.append(os.path.join(ROOT, "results"))
 TRACE_DIRS = [os.path.join(d, "traces") for d in RESULT_DIRS]
 
@@ -176,20 +176,25 @@ def label_of(algo, text, emph):
 PDGR_CSV = os.path.join(ROOT, "data", "pdgr.csv")
 
 
-def load_pdgr():
-    """External PDGR results, by display name. This repository does not run
-    PDGR (it is liu2025unified / FrankWolfe.jl), but the paper reports it and
-    it holds the best lower bound on several instances, so the generator needs
-    the values to place the row and to compute boldface correctly."""
+def load_pdgr(result_dirs=None):
+    """Local PDGR runs by display name, with the published CSV as fallback.
+
+    A local run replaces the entire row, including missing one-sided bounds,
+    so certificates from different configurations are never silently mixed.
+    """
     out = {}
-    if not os.path.isfile(PDGR_CSV):
-        return out
-    import csv as _csv
-    with open(PDGR_CSV) as fh:
-        for r in _csv.DictReader(l for l in fh if not l.startswith("#")):
-            num = lambda k: float(r[k]) if r[k].strip() else None
-            out[r["instance"]] = dict(ub=num("ub_relx"), lb=num("lb_relx"),
-                                      time=num("time"))
+    if os.path.isfile(PDGR_CSV):
+        with open(PDGR_CSV) as fh:
+            for r in csv.DictReader(l for l in fh if not l.startswith("#")):
+                num = lambda k: float(r[k]) if r[k].strip() else None
+                out[r["instance"]] = dict(ub=num("ub_relx"), lb=num("lb_relx"),
+                                          time=num("time"))
+    for state, (name, _) in load_instances(os.path.join(ROOT, "benchmark")).items():
+        rec = load_result(RESULT_DIRS if result_dirs is None else result_dirs, state, "PDGR")
+        if rec is not None:
+            finite = lambda value: value if math.isfinite(value) else None
+            out[display_name(name)] = dict(ub=finite(rec["glbub"]),
+                                          lb=finite(rec["glblb"]), time=rec["time"])
     return out
 
 
@@ -202,15 +207,16 @@ def bounds_block(ctx, m, rows, pdgr_placeholder=False):
     breaks them.
     """
     out = []
+    pdgr = load_pdgr(ctx.result_dirs) if pdgr_placeholder else {}
     for state in ctx.states(m):
         recs = {a: load_result(ctx.result_dirs, state, a) for a, _, _ in rows}
         rnd = lambda v: round(v, 5)
         ubs = [rnd(r["glbub"]) for r in recs.values()
                if r and r["glbub"] != 0.0 and math.isfinite(r["glbub"])]
         lbs = [rnd(r["glblb"]) for r in recs.values() if r and math.isfinite(r["glblb"])]
-        pd = load_pdgr().get(display_name(ctx.name(state))) if pdgr_placeholder else None
+        pd = pdgr.get(display_name(ctx.name(state)))
         if pd:
-            # PDGR competes for boldface even though we do not run it
+            # Both local PDGR runs and the published fallback compete for boldface.
             if pd["ub"] is not None: ubs.append(rnd(pd["ub"]))
             if pd["lb"] is not None: lbs.append(rnd(pd["lb"]))
         best_ub = min(ubs) if ubs else None      # upper bound: smaller is tighter

@@ -1,0 +1,20 @@
+{
+  "name": "EntanglementDetection",
+  "repository": "https://github.com/ZIB-IOL/EntanglementDetection.jl",
+  "source_checkout": "EntanglementDetection.jl_private",
+  "author": "Y.C. Liu",
+  "commit": "67b40912fe97e63173bad56704c4158ebe40d155",
+  "source_sha256": {
+    "src/eigmin.jl": "477a824314cbaa03368ee88c02fd72c3a1195aa71d6163a64858a4d96edbe0db",
+    "src/approximations.jl": "782359e5659c3ed0d7adf834080eae46380e3cde1cf0dc798a7d47d03ec3b60e",
+    "src/types.jl": "a0a74ee623dfa54db2c24757ffa6105c0bbed72a4249f52f306b9e884567a762",
+    "src/callback.jl": "091f7caf8dcca49091f10b7b427b668c6ecf80075640d322fb233a6d93b918f5",
+    "src/fw_methods.jl": "5f3277a26ec5e558b0fdec07a33560535d56364cdaf921947687875e7493dd06",
+    "src/utils.jl": "3592713f2108eeff8d14cbd1a5b53cc44737c7c00aa747afbf1729ed10acb838",
+    "src/separable_distance.jl": "f7121cf4219afa7946e89f32743ce76bf6544f2a445bc0eca05cf00bcc2b1f98",
+    "src/entanglement_detection.jl": "8d66bb477c4378f62736241d4c4752d394b9c483c7a9846180af7a4294e30d95",
+    "src/separability_certification.jl": "117e6cc2a2cb27fac60e88ed2ae321565722ce30f2284b81d596e1876e035b38",
+    "results/Liding/white_noise_bounds.jl": "798312cb1c5e9d72fbc6f7240ef35030855e1dd436247575668cd552c98ac330",
+    "results/Liding/both.jl": "fdf09fb50fc5c49fb2c350bd734e265e316440e7d0955c1d07d0711672dcec87"
+  }
+}

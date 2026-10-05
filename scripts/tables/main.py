@@ -1,10 +1,8 @@
 """The three main results tables (tab.m3, tab.m4, tab.m5).
 
 One block per state, one row per algorithm compared in the paper. The PDGR
-rows come from an external implementation (liu2025unified / FrankWolfe.jl) that this
-repository does not run; their values live in data/pdgr.csv and are placed and
-bolded alongside our own, since PDGR holds the best lower bound on several
-instances.
+rows use local runs of the bundled implementation (liu2025unified / FrankWolfe.jl)
+when available, falling back to the published values in data/pdgr.csv.
 
 Produced by: scripts/exp_main.sh
 """

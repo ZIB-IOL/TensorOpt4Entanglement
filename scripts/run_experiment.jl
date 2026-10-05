@@ -14,7 +14,7 @@ function parseCommandline()
             arg_type = String
             required = true
         "--algo", "-a"
-            help = "algorithm (paper names): Alt-SDP, LADMM, CP, IR, DPS, DDPS+; " *
+            help = "algorithm (paper names): Alt-SDP, LADMM, CP, IR, DPS, DDPS+, PDGR; " *
                    "LADMM_400..LADMM_900 (m=5 rank sweep); " *
                    "DDPS, CP-DDPS, IR-DDPS (DDPS-only ablation); " *
                    "Alt-SDP+CP, IR-nolazy, IR-clear, DualALM. " *
@@ -65,6 +65,31 @@ function parseCommandline()
             help = "LP loops"
             arg_type = Int
             default = -1
+        "--pdgr-mode"
+            help = "PDGR certificate mode: both, ent, or sep"
+            arg_type = String
+            default = "both"
+        "--pdgr-bound-atol"
+            help = "PDGR target bound gap (default 1e-3)"
+            arg_type = Float64
+        "--pdgr-max-steps"
+            help = "PDGR maximum noise probes (default 15)"
+            arg_type = Int
+        "--pdgr-fw-epsilon"
+            help = "PDGR Frank-Wolfe primal tolerance (default 1e-7)"
+            arg_type = Float64
+        "--pdgr-fw-max-iteration"
+            help = "PDGR maximum Frank-Wolfe iterations per probe (default 1000000)"
+            arg_type = Int
+        "--pdgr-lmo-nb"
+            help = "PDGR alternating oracle restarts (default 10)"
+            arg_type = Int
+        "--pdgr-lmo-max-iter"
+            help = "PDGR iterations per alternating oracle restart (default 1000)"
+            arg_type = Int
+        "--pdgr-witness-max-length"
+            help = "PDGR witness net size budget (default 10000000)"
+            arg_type = Int
     end
     return parse_args(s)
 end

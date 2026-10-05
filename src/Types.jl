@@ -65,6 +65,7 @@ Alternating SDP (Alt-SDP)
 Misc
   `seed`        RNG seed
   `start_time`  run start, set at construction
+  `pdgr`        PDGR.Options with settings specific to the PDGR baseline
 """
 mutable struct Param
    solver::String
@@ -101,6 +102,7 @@ mutable struct Param
    pool_size::Int
    pointsize_bound::Int
    rank_bound::Int
+   pdgr::PDGR.Options
 
    function Param(;
          solver::String = "MSK",
@@ -136,7 +138,8 @@ mutable struct Param
          lazification::Bool = false,
          pool_size::Int = 5000,
          pointsize_bound::Int = 100,
-         rank_bound::Int = 500)
+         rank_bound::Int = 500,
+         pdgr::PDGR.Options = PDGR.Options())
       new(solver, time_limit, obj_tol, master_obj_tol, tol, feas_tol, log_level,
           thread, maxnnodes, maxeffortnnodes, minnnodes, maxrounds, seed,
           heur_LADMM1_maxiter, heur_LADMM_maxiter, heur_LADMM_obj_tol,
@@ -144,7 +147,7 @@ mutable struct Param
           heur_MANOPT_maxiter, heur_MANOPT1_maxiter, heur_alternate_iter,
           heur_alternate1_iter, heur_alternate_maxfail, max_obbt, relaxation,
           loop, start_time, is_last, tratio, lazification, pool_size,
-          pointsize_bound, rank_bound)
+          pointsize_bound, rank_bound, pdgr)
    end
 end
 
@@ -195,4 +198,3 @@ function extendTimeLimit!(param::Param)
    param.time_limit += extra
    return param
 end
-

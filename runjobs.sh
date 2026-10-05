@@ -78,6 +78,7 @@ done
 
 MODE=slurm
 PARTS=(); FLAGS=()
+SELECTED_ALGOS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --local)      MODE=local; shift ;;
@@ -86,6 +87,12 @@ while [[ $# -gt 0 ]]; do
         --skip-env-check) SKIP_ENV_CHECK=1; shift ;;
         --skip-precompile-warmup) SKIP_PRECOMPILE_WARMUP=1; shift ;;
         --dry-run|-n) MODE=dry; shift ;;
+        --julia)
+            export JULIA_BIN="$2"
+            FLAGS+=("$1" "$2"); shift 2 ;;
+        -a|--algo)
+            SELECTED_ALGOS+=("$2")
+            FLAGS+=("$1" "$2"); shift 2 ;;
         -h|--help)
             echo "Usage: $(basename "$0") [parts...] [--local|--dry-run|--check|--env] [options]"
             echo "  parts: ${ALL[*]}   (default: all)"
@@ -95,13 +102,22 @@ while [[ $# -gt 0 ]]; do
             bash scripts/exp_main.sh --help | sed -n '3,$p'
             exit 0 ;;
         -*) FLAGS+=("$1")
-            case "$1" in -t|--time-limit|-s|--state|-a|--algo|-m|--size|--results-dir|--trace-dir|--log-dir|--julia)
+            case "$1" in -t|--time-limit|-s|--state|-m|--size|--results-dir|--trace-dir|--log-dir|--seed|--log-level|--pdgr-*)
                 FLAGS+=("$2"); shift ;; esac
             shift ;;
         *)  PARTS+=("$1"); shift ;;
     esac
 done
 [[ ${#PARTS[@]} -eq 0 ]] && PARTS=("${ALL[@]}")
+
+# PDGR-only invocations use their own numerical probe instead of a MOSEK LP.
+export EXACTENT_NEEDS_MOSEK=1
+if [[ ${#SELECTED_ALGOS[@]} -gt 0 ]]; then
+    EXACTENT_NEEDS_MOSEK=0
+    for algo in "${SELECTED_ALGOS[@]}"; do
+        [[ "$algo" == "PDGR" ]] || EXACTENT_NEEDS_MOSEK=1
+    done
+fi
 
 # --env validates the environment these settings actually produce, which is
 # not the same as the caller's ambient one.

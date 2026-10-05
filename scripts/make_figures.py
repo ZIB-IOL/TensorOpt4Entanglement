@@ -92,8 +92,8 @@ def fig_bounds(out, data):
         fh.write("# idx best_ub best_lb cp_lb\n")
         for i, bu, bl, cp in rows:
             fh.write(f"{i} {bu:.5f} {bl:.5f} {cp:.5f}\n")
-    # separate file: PDGR ran on only five of the instances, and a gap is
-    # cleaner than a sentinel pgfplots has to be told to skip
+    # Separate file: PDGR coverage may be incomplete; omit missing points
+    # rather than emitting a sentinel pgfplots has to be told to skip.
     ppdgr = os.path.join(data, "pdgr_by_instance.dat")
     with open(ppdgr, "w") as fh:
         fh.write("# idx pdgr_lb\n")

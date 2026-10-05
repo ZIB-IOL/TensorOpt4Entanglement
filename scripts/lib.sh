@@ -23,6 +23,7 @@ declare -A _JOBLIST_STARTED
 # optional narrowing, set by --state / --algo
 ONLY_STATES=()
 ONLY_ALGOS=()
+JULIA_ARGS=()
 
 # Legacy algorithm codes, mirroring LEGACY_ALIASES in src/Drivers.jl so that
 # --algo accepts the same spellings as the Julia CLI. test_params.jl asserts
@@ -71,6 +72,16 @@ Usage: $(basename "$0") [options]
       --trace-dir DIR    where trajectory CSVs go     (default <results>/traces/)
       --log-dir DIR      where per-job logs go        (default <results>/logs/)
       --julia CMD        julia command to use         (default: julia +1.11.6)
+      --seed INT         RNG seed forwarded to Julia
+      --log-level INT    Julia log level (0-3)
+      --pdgr-mode MODE   PDGR bounds: both, ent, or sep
+      --pdgr-bound-atol FLOAT       target PDGR gap
+      --pdgr-max-steps INT          maximum PDGR noise probes
+      --pdgr-fw-epsilon FLOAT       Frank-Wolfe tolerance
+      --pdgr-fw-max-iteration INT   Frank-Wolfe iteration limit
+      --pdgr-lmo-nb INT             alternating-oracle restarts
+      --pdgr-lmo-max-iter INT       iterations per oracle restart
+      --pdgr-witness-max-length INT witness net size budget
   -h, --help             this message
 
 Equivalent environment variables: FORCE, DRY_RUN, TIME_LIMIT, USE_SLURM,
@@ -92,6 +103,11 @@ parse_args() {
             --trace-dir)      TRACE_DIR="$2"; shift 2 ;;
             --log-dir)        LOG_DIR="$2"; shift 2 ;;
             --julia)          JULIA_BIN="$2"; shift 2 ;;
+            --seed|--log-level|--pdgr-mode|--pdgr-bound-atol|--pdgr-max-steps|--pdgr-fw-epsilon|--pdgr-fw-max-iteration|--pdgr-lmo-nb|--pdgr-lmo-max-iter|--pdgr-witness-max-length)
+                [[ $# -ge 2 && -n "$2" && "$2" != *[[:space:]]* ]] || {
+                    echo "ERROR: $1 requires one value without whitespace" >&2; exit 2;
+                }
+                JULIA_ARGS+=("$1" "$2"); shift 2 ;;
             -h|--help)        usage; exit 0 ;;
             *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
         esac
@@ -110,6 +126,10 @@ pick_julia() {
 
 
 check_env() {
+    local needs_mosek=0 algo
+    for algo in "$@"; do
+        [[ "$algo" == "PDGR" ]] || needs_mosek=1
+    done
     JULIA="$(pick_julia)"
     if ! command -v ${JULIA%% *} >/dev/null 2>&1; then
         echo "ERROR: julia not found on PATH (set JULIA_BIN)." >&2; exit 1
@@ -119,7 +139,7 @@ check_env() {
         1.11.*) ;;
         *) echo "WARNING: using Julia $v; this project is pinned to 1.11.x (README)." >&2 ;;
     esac
-    if [[ -z "${MOSEKLM_LICENSE_FILE:-}" && ! -f "$HOME/mosek/mosek.lic" ]]; then
+    if [[ "$needs_mosek" == "1" && -z "${MOSEKLM_LICENSE_FILE:-}" && ! -f "$HOME/mosek/mosek.lic" ]]; then
         echo "ERROR: no Mosek licence found." >&2
         echo "       set MOSEKLM_LICENSE_FILE=/path/to/mosek.lic, or place it at ~/mosek/mosek.lic" >&2
         exit 1
@@ -180,6 +200,7 @@ run_job() {
     local start; start=$(date +%s)
     ( cd "$REPO_ROOT" && EXACTENT_TRACE="$trace" EXACTENT_RESULTS_DIR="$RESULTS_DIR" \
         $JULIA --project=. scripts/run_experiment.jl -s "$state" -a "$algo" -t "$TIME_LIMIT" \
+        "${JULIA_ARGS[@]}" \
         > "$LOG_DIR/${state}_${algo}.log" 2>&1 )
     local rc=$? dur=$(( $(date +%s) - start ))
     if [[ $rc -ne 0 ]]; then
@@ -194,7 +215,6 @@ run_job() {
 run_table() {
     local table="$1" m="$2"; shift 2
     local algos=("$@")
-    check_env
     local states; mapfile -t states < <(instances_with_m "$m")
     if [[ ${#states[@]} -eq 0 ]]; then
         echo "ERROR: no benchmark instances with N = $m in $BENCHMARK_DIR" >&2; exit 1
@@ -227,17 +247,20 @@ run_table() {
         states=("${keepst[@]}")
     fi
 
+    check_env "${algos[@]}"
+
     echo "=============================================================="
     echo " Table: $table   (m = $m)"
     echo " states:     ${#states[@]}  -> $(for s in "${states[@]}"; do printf '%s ' "$(state_name "$s")"; done)"
     echo " algorithms: ${algos[*]}"
     echo " time limit: $TIME_LIMIT  (-1 = paper default for this m)"
     echo " results:    $RESULTS_DIR"
+    [[ ${#JULIA_ARGS[@]} -eq 0 ]] || echo " options:    ${JULIA_ARGS[*]}"
     echo "=============================================================="
 
     if [[ "$USE_SLURM" == "1" ]]; then
         # One list per experiment part, in the format run.slurm parses. The
-        # fifth field routes results to this part's directory.
+        # fourth field routes results; subsequent fields carry Julia options.
         # run.slurm reads the list when each array task starts, not at submit
         # time, so a list must never be rewritten while a submission is still
         # pending. Each invocation gets its own timestamped file.
@@ -259,7 +282,11 @@ run_table() {
                 skipped=$((skipped+1))
                 continue
             fi
-            echo "$s $a $TIME_LIMIT $RESULTS_DIR" >> "$joblist"
+            {
+                printf '%s %s %s %s' "$s" "$a" "$TIME_LIMIT" "$RESULTS_DIR"
+                [[ ${#JULIA_ARGS[@]} -eq 0 ]] || printf ' %s' "${JULIA_ARGS[@]}"
+                printf '\n'
+            } >> "$joblist"
             added=$((added+1))
         done; done
         local n; n=$(wc -l < "$joblist")

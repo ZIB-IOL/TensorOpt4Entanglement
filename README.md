@@ -7,37 +7,71 @@ entanglement thresholds. Reproduces the paper's tables and figures.
 
 | | version | note |
 |---|---|---|
-| Julia | **1.11.4** | what `Manifest.toml` records; any 1.11.x works, 1.12+ re-resolves to different package versions |
-| Mosek.jl | **10.2.0** | pinned in `[compat]`; downloads **MOSEK 10.2** itself |
-| MosekTools.jl | 0.15.5 | |
+| Julia | **1.11.4** | use this version to reproduce the root `Manifest.toml` environment |
+| Mosek.jl | **10.2.0** | root manifest version; installs the MOSEK library for solver-backed algorithms |
+| MosekTools.jl | 0.15.5 | MOSEK/JuMP interface in the full project |
 
-A MOSEK **licence** is all you supply — there is no solver path to configure.
-The machine that installs needs outbound internet for the download.
+A MOSEK **licence** is needed for runs that include solver-backed algorithms.
+PDGR-only runs and environment checks need no MOSEK licence. Initial
+installation needs internet access to download Julia dependencies.
 
 ## Installation
 
+Run from the repository root. The usual `runjobs.sh` command runs
+`Pkg.instantiate()` and `Pkg.precompile()` before a local run or Slurm
+submission, installing all dependencies from the main project.
+
 ```bash
-# 1. environment
 juliaup add 1.11.4
-export JULIA_BIN='julia +1.11.4'                   # plain `julia` reads +1.11.4 as a filename
+export JULIA_BIN='julia +1.11.4'
+
+# Optional local package cache: uncomment BOTH lines before installing.
+# mkdir -p .julia_depot
+# export JULIA_DEPOT_PATH="$PWD/.julia_depot:"
+
+# Install automatically, then run one PDGR benchmark locally.
+bash runjobs.sh --local main --algo PDGR --state state_13.jl -t 600 --seed 0
+```
+
+If `.julia_depot` already exists, set `JULIA_DEPOT_PATH` as above before
+installation: `runjobs.sh` selects that directory automatically, whereas
+direct Julia commands otherwise use the default cache.
+
+For runs that include MOSEK-backed algorithms, also configure the licence:
+
+```bash
 export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic     # or port@host
-mkdir .julia_depot                                 # optional: packages beside the repo
-
-# 2. install and compile
-$JULIA_BIN --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-
-# 3. only if MOSEK will not load (see below)
-python3 scripts/fix_execstack.py --src <mosek>/10.2/tools/platform/linux64x86/bin
-export MOSEKBINDIR=$PWD/.mosek_bin
-$JULIA_BIN --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
-
-# 4. verify -- checks Julia, layout, disk, and solves a test LP
 bash runjobs.sh --env
 ```
 
-Tests: `$JULIA_BIN --project=. -e 'using Pkg; Pkg.test()'`
+`--env` checks the batch environment and solves a test LP. For a PDGR-only
+check, run the small product-state probe instead:
 
-### Step 3: MOSEK on recent glibc
+```bash
+bash runjobs.sh --env --algo PDGR
+```
+
+Environment checks and dry runs do not install packages. For manual setup
+without starting a benchmark:
+
+```bash
+$JULIA_BIN --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+```
+
+Run the Julia tests. MOSEK-backed integration tests are skipped when no usable
+licence is available:
+
+```bash
+$JULIA_BIN --project=. -e 'using Pkg; Pkg.test()'
+```
+
+Run the driver tests, which use local Julia/Slurm stubs and submit no jobs:
+
+```bash
+python3 -m unittest discover -s test -p test_runner.py
+```
+
+### MOSEK loading on recent glibc
 
 MOSEK 10.2's `libmosek64.so` declares `PT_GNU_STACK = RWE`, and modern glibc
 refuses to make the stack executable at `dlopen`:
@@ -50,8 +84,21 @@ cannot enable executable stack as shared object requires: Invalid argument
 **MOSEK 10.2**, matching Mosek.jl 10.2.0 — `Pkg.build` rejects any other
 version, so a 10.1 or 11.x install fails here.
 
+Only if the loading error above occurs, replace `/path/to/mosek` with the
+installed MOSEK directory and run:
+
+```bash
+python3 scripts/fix_execstack.py --src /path/to/mosek/10.2/tools/platform/linux64x86/bin
+export MOSEKBINDIR="$PWD/.mosek_bin"
+$JULIA_BIN --project=. -e 'using Pkg; Pkg.build("Mosek"); Pkg.precompile()'
+```
+
 If you are not patching, leave `MOSEKBINDIR` **unset**: it overrides Mosek.jl's
-own download. `unset MOSEKBINDIR` if one is left over.
+own download. Clear a leftover value with:
+
+```bash
+unset MOSEKBINDIR
+```
 
 ## Site settings
 
@@ -85,31 +132,35 @@ interrupted run. `--force` redoes everything.
 Subsets — parts are `main`, `lowrank`, `ddps_ablation`:
 
 ```bash
-bash runjobs.sh --size 3                                # probe: m=3 only, 27 jobs
+bash runjobs.sh --size 3                                # probe: m=3 only, 30 jobs
 bash runjobs.sh main                                    # one part
+bash runjobs.sh --local main --algo PDGR --state state_13.jl -t 600
 bash scripts/exp_main.sh --state state_13.jl --algo CP  # exactly one job
 bash scripts/exp_main.sh -t 60 --results-dir /tmp/smoke # smoke test
 ```
 
 | experiment | runs | results | cost |
 |---|---|---|---|
-| `scripts/exp_main.sh` | all × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+} | `results/main/` | ~210 CPU-h |
+| `scripts/exp_main.sh` | all × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+, PDGR} | `results/main/` | ~210 CPU-h plus PDGR |
 | `scripts/exp_lowrank.sh` | m=5 × LADMM, r = 400…900 | `results/lowrank/` | ~72 CPU-h |
 | `scripts/exp_ddps_ablation.sh` | DDPS-only variants | `results/ddps/` | ~80 CPU-h |
 
 ## Tables and figures
 
+Set the destination to your paper directory:
+
 ```bash
-python3 scripts/make_tables.py  --out <paper>/tables   # all tables
-python3 scripts/make_figures.py --out <paper>          # all figures
-python3 scripts/make_tables.py  --list                 # registered tables
-python3 scripts/make_tables.py  --manifest             # raw file behind every cell
+paper_dir=/path/to/paper
+python3 scripts/make_tables.py  --out "$paper_dir/tables" # all tables
+python3 scripts/make_figures.py --out "$paper_dir"        # all figures
+python3 scripts/make_tables.py  --list                   # registered tables
+python3 scripts/make_tables.py  --manifest               # raw file behind every cell
 ```
 
 Tables: `m3` `m4` `m5` `m5low` `m5cp` `ddps` `ddps3` `ddps4` `ddps5` `mem`.
 Figures: `bounds` (per-instance bounds + performance profile), `convergence`.
 
-Results are searched in `results/main`, `results/lowrank`, `results/ddps`, then
+Results are searched in `results/main`, `results/lowrank`, `results/ddps`, `results/pdgr`, then
 `results/`, first hit winning — so a stray smoke run in `results/main/` silently
 shadows the published data. Send throwaway runs elsewhere with `--results-dir`.
 
@@ -128,11 +179,34 @@ Stable contract — `results/` filenames and the analysis scripts key off them.
 | `CP` | standalone cutting plane |
 | `IR` | iterative refinement (LADMM + CP) |
 | `DPS` | DPS hierarchy lower bound via Ket.jl |
+| `PDGR` | primal-dual geometric reconstruction |
 | `DDPS+` | PPT + partial trace + scalar McCormick at every tree node |
 | `DDPS`, `CP-DDPS`, `IR-DDPS` | DDPS-only counterparts, for the ablation |
 
 Pre-rename shorthand (`A`, `LD1`, `D`, `LDL`, `PPT`, `RLT`, …) is still accepted
 on the command line and when reading result files.
+
+## PDGR
+
+The implementation in [`lib/PDGR`](lib/PDGR/) is adapted from
+[EntanglementDetection.jl](https://github.com/ZIB-IOL/EntanglementDetection.jl).
+It is a self-contained source folder loaded by the main project, with no
+separate package installation or external checkout required. It supports all 11 benchmarks and
+uses the same `-t`, `--seed`, and `--log-level` options as the other algorithms.
+Time limits are cooperative, and completed bounds and certificates are saved on timeout.
+Source provenance and adaptations are recorded in [`lib/PDGR/NOTICE`](lib/PDGR/NOTICE).
+
+Run PDGR locally:
+
+```bash
+bash runjobs.sh --local main --algo PDGR
+```
+
+Show available options, including the PDGR settings:
+
+```bash
+bash runjobs.sh --help
+```
 
 ## Result files
 
@@ -145,13 +219,17 @@ mem_total_* / mem_cp_* / mem_lmo_* / mem_ladmm_*   memory per level (nested)
 
 `EXACTENT_TRACE` is a path prefix; the loops append `<prefix>.cp.csv`
 (`iter,is_last,ub_relx,lb_relx,b_lower,n_states`) and `<prefix>.ladmm.csv`.
-The experiment scripts set it automatically.
-`EXACTENT_NO_DIAGNOSTICS=1` skips the extra model build.
+The experiment scripts set it automatically. To skip the extra model build:
+
+```bash
+export EXACTENT_NO_DIAGNOSTICS=1
+```
 
 ## Layout
 
 ```
 src/            the ExactEntanglement package (sbb/, cuttingplane/, solvers/)
+lib/PDGR/       PDGR source adapted from EntanglementDetection.jl
 benchmark/      input instances
 scripts/        experiment drivers (exp_*.sh) and analysis (make_*.py)
 results/        output

@@ -1,0 +1,30 @@
+This folder contains code adapted from EntanglementDetection.jl by Y.C. Liu:
+https://github.com/ZIB-IOL/EntanglementDetection.jl
+
+The selected source and white-noise driver were provided through
+EntanglementDetection.jl_private. The source checkout commit and SHA-256
+hashes of the original files are recorded in UPSTREAM.json.
+
+The public project's MIT copyright and permission notice is retained in
+LICENSE.upstream. No license file was present in the supplied private checkout;
+this notice does not relicense its additional code.
+
+Included: eigenvalue workspaces, state approximations, LMO types and methods,
+tensor conversions, Frank-Wolfe distance/callback code, separable-ball radii,
+and the results/Liding/white_noise_bounds.jl driver.
+Excluded: upstream datasets, saved results, examples, optional Tullio extension,
+other robustness/detection drivers, and the Roots dependency.
+
+Local changes:
+- Place the selected core inside PDGR and use a relative module import.
+- Set option defaults to the supplied results/Liding/both.jl configuration.
+- Add option validation and cooperative time limits; return only completed
+  bound updates if the time limit interrupts an oracle or witness enumeration.
+- Remove the internal unconditional seed-zero reset so the configured seed
+  controls each probe. Seed zero retains the original behavior.
+- Omit an unused distance overload with undefined dims/bases variables.
+- Extract only the separable_ball_radius functions from the certification files.
+- Keep the witness for the strongest lower bound; upstream could replace it
+  with a later weaker witness without lowering the reported bound.
+- Reject witness budgets too small to construct the minimum local net with
+  an explicit error naming the required size.
