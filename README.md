@@ -17,58 +17,34 @@ installation needs internet access to download Julia dependencies.
 
 ## Installation
 
-Run from the repository root. The usual `runjobs.sh` command runs
-`Pkg.instantiate()` and `Pkg.precompile()` before a local run or Slurm
-submission, installing all dependencies from the main project.
-
 ```bash
+# 1. Julia
 juliaup add 1.11.4
 export JULIA_BIN='julia +1.11.4'
 
-# Optional local package cache: uncomment BOTH lines before installing.
-# mkdir -p .julia_depot
-# export JULIA_DEPOT_PATH="$PWD/.julia_depot:"
+# 2. optional: keep packages beside the repo
+mkdir -p .julia_depot && export JULIA_DEPOT_PATH="$PWD/.julia_depot:"
 
-# Install automatically, then run one PDGR benchmark locally.
-bash runjobs.sh --local main --algo PDGR --state state_13.jl -t 600 --seed 0
-```
-
-If `.julia_depot` already exists, set `JULIA_DEPOT_PATH` as above before
-installation: `runjobs.sh` selects that directory automatically, whereas
-direct Julia commands otherwise use the default cache.
-
-For runs that include MOSEK-backed algorithms, also configure the licence:
-
-```bash
+# 3. MOSEK licence -- needed only for solver-backed algorithms, not PDGR
 export MOSEKLM_LICENSE_FILE=/path/to/mosek.lic     # or port@host
+
+# 4. install and compile
+$JULIA_BIN --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# 5. verify -- solves a test LP; use --algo PDGR for a licence-free check
 bash runjobs.sh --env
 ```
 
-`--env` checks the batch environment and solves a test LP. For a PDGR-only
-check, run the small product-state probe instead:
+`runjobs.sh` also instantiates and precompiles before any local run or Slurm
+submission, so step 4 is only needed to install without starting a benchmark.
+Set `JULIA_DEPOT_PATH` before installing, or direct Julia commands use the
+default cache.
+
+Tests:
 
 ```bash
-bash runjobs.sh --env --algo PDGR
-```
-
-Environment checks and dry runs do not install packages. For manual setup
-without starting a benchmark:
-
-```bash
-$JULIA_BIN --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-```
-
-Run the Julia tests. MOSEK-backed integration tests are skipped when no usable
-licence is available:
-
-```bash
-$JULIA_BIN --project=. -e 'using Pkg; Pkg.test()'
-```
-
-Run the driver tests, which use local Julia/Slurm stubs and submit no jobs:
-
-```bash
-python3 -m unittest discover -s test -p test_runner.py
+$JULIA_BIN --project=. -e 'using Pkg; Pkg.test()'         # MOSEK tests skip without a licence
+python3 -m unittest discover -s test -p test_runner.py    # driver tests, no jobs submitted
 ```
 
 ### MOSEK loading on recent glibc
