@@ -105,40 +105,65 @@ bash runjobs.sh --help         # all options
 A job whose result file exists is **skipped**, so re-running resumes an
 interrupted run. `--force` redoes everything.
 
-Subsets — parts are `main`, `lowrank`, `ddps_ablation`:
+The experiments come in three parts, each with its own script and result
+directory; `bash runjobs.sh <part>` runs one of them:
+
+| part | script | runs | results | cost |
+|---|---|---|---|---|
+| `main` | `scripts/exp_main.sh` | all × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+, PDGR} | `results/main/` | ~210 CPU-h (PDGR ~1.4 of them) |
+| `lowrank` | `scripts/exp_lowrank.sh` | m=5 × LADMM, r = 400…900 | `results/lowrank/` | ~72 CPU-h |
+| `ddps_ablation` | `scripts/exp_ddps_ablation.sh` | DDPS-only variants | `results/ddps/` | ~80 CPU-h |
+
+## Reproducing each table and figure
+
+Each row gives the runs a table or figure reads and the command that writes it.
+Add `--local` to a `runjobs.sh` command to run on this machine instead of
+Slurm. Numbers are those of the revised paper; the LaTeX label is in brackets.
 
 ```bash
-bash runjobs.sh --size 3                                # probe: m=3 only, 30 jobs
-bash runjobs.sh main                                    # one part
-bash runjobs.sh --local main --algo PDGR --state state_13.jl -t 600
+paper_dir=/path/to/paper
+```
+
+| paper | content | experiment | generator |
+|---|---|---|---|
+| Table 1 (`tab.mem`) | peak memory | `bash runjobs.sh main` | `python3 scripts/make_tables.py --table mem --out "$paper_dir/tables"` |
+| Figure 1 (`fig.profiles`) | bounds per instance, lower-bound profile | `bash runjobs.sh main` | `python3 scripts/make_figures.py --figure bounds --out "$paper_dir"` |
+| Table 2 (`tab.m3`) | results, m=3 | `bash runjobs.sh main --size 3` | `python3 scripts/make_tables.py --table m3 --out "$paper_dir/tables"` |
+| Table 3 (`tab.m4`) | results, m=4 | `bash runjobs.sh main --size 4` | `python3 scripts/make_tables.py --table m4 --out "$paper_dir/tables"` |
+| Table 4 (`tab.m5`) | results, m=5 | `bash runjobs.sh main --size 5` | `python3 scripts/make_tables.py --table m5 --out "$paper_dir/tables"` |
+| Table 5 (`tab.ddps`) | DDPS vs DDPS+ ablation | `bash runjobs.sh ddps_ablation` and `bash runjobs.sh main --algo DDPS+ --algo CP --algo IR` | `python3 scripts/make_tables.py --table ddps --out "$paper_dir/tables"` |
+| Table 6 (`tab.m5low`) | LADMM rank sweep, m=5 | `bash runjobs.sh lowrank` | `python3 scripts/make_tables.py --table m5low --out "$paper_dir/tables"` |
+| Table 7 (`tab.m5CP`) | gap-closing CP averages, m=5 | `bash runjobs.sh main --size 5 --algo CP --algo IR` | `python3 scripts/make_tables.py --table m5cp --out "$paper_dir/tables"` |
+| Figure 2 (`fig.conv.m5`) | CP and IR convergence, m=5 | `bash runjobs.sh main --size 5 --algo CP --algo IR` | `python3 scripts/make_figures.py --figure convergence --out "$paper_dir"` |
+
+Table 5 pairs each DDPS run from `ddps_ablation` with its DDPS+ counterpart
+from `main`, so it needs both. Table 7 and Figure 2 read the CP trajectories
+that `main` records in `results/main/traces/`.
+
+Everything at once:
+
+```bash
+bash runjobs.sh                                           # all three parts
+python3 scripts/make_tables.py  --out "$paper_dir/tables" # all tables
+python3 scripts/make_figures.py --out "$paper_dir"        # all figures
+```
+
+For debugging, a single job or a short smoke run kept apart from the
+published results:
+
+```bash
 bash scripts/exp_main.sh --state state_13.jl --algo CP  # exactly one job
 bash scripts/exp_main.sh -t 60 --results-dir /tmp/smoke # smoke test
 ```
 
-| experiment | runs | results | cost |
-|---|---|---|---|
-| `scripts/exp_main.sh` | all × {Alt-SDP, LADMM, CP, IR, DPS, DDPS+, PDGR} | `results/main/` | ~210 CPU-h plus PDGR |
-| `scripts/exp_lowrank.sh` | m=5 × LADMM, r = 400…900 | `results/lowrank/` | ~72 CPU-h |
-| `scripts/exp_ddps_ablation.sh` | DDPS-only variants | `results/ddps/` | ~80 CPU-h |
-
-## Tables and figures
-
-Set the destination to your paper directory:
-
-```bash
-paper_dir=/path/to/paper
-python3 scripts/make_tables.py  --out "$paper_dir/tables" # all tables
-python3 scripts/make_figures.py --out "$paper_dir"        # all figures
-python3 scripts/make_tables.py  --list                   # registered tables
-python3 scripts/make_tables.py  --manifest               # raw file behind every cell
-```
-
-Tables: `m3` `m4` `m5` `m5low` `m5cp` `ddps` `ddps3` `ddps4` `ddps5` `mem`.
-Figures: `bounds` (per-instance bounds + performance profile), `convergence`.
+## Notes on the generators
 
 Results are searched in `results/main`, `results/lowrank`, `results/ddps`, `results/pdgr`, then
 `results/`, first hit winning — so a stray smoke run in `results/main/` silently
 shadows the published data. Send throwaway runs elsewhere with `--results-dir`.
+
+The results tables print the exact threshold under each state for which one is
+known; the values and their sources are in `data/exact_thresholds.csv`.
 
 matplotlib is not a dependency: the scripts emit `.dat` files that pgfplots
 `\addplot table` reads directly.
@@ -155,40 +180,27 @@ Stable contract — `results/` filenames and the analysis scripts key off them.
 | `CP` | standalone cutting plane |
 | `IR` | iterative refinement (LADMM + CP) |
 | `DPS` | DPS hierarchy lower bound via Ket.jl |
-| `PDGR` | primal-dual geometric reconstruction |
+| `PDGR` | primal-dual geometric reconstruction (baseline, [`lib/PDGR`](lib/PDGR/)) |
 | `DDPS+` | PPT + partial trace + scalar McCormick at every tree node |
 | `DDPS`, `CP-DDPS`, `IR-DDPS` | DDPS-only counterparts, for the ablation |
 
 Pre-rename shorthand (`A`, `LD1`, `D`, `LDL`, `PPT`, `RLT`, …) is still accepted
 on the command line and when reading result files.
 
-## PDGR
-
-The implementation in [`lib/PDGR`](lib/PDGR/) is adapted from
-[EntanglementDetection.jl](https://github.com/ZIB-IOL/EntanglementDetection.jl).
-It is a self-contained source folder loaded by the main project, with no
-separate package installation or external checkout required. It supports all 11 benchmarks and
-uses the same `-t`, `--seed`, and `--log-level` options as the other algorithms.
-Time limits are cooperative, and completed bounds and certificates are saved on timeout.
-Source provenance and adaptations are recorded in [`lib/PDGR/NOTICE`](lib/PDGR/NOTICE).
-
-Run PDGR locally:
-
-```bash
-bash runjobs.sh --local main --algo PDGR
-```
-
-Show available options, including the PDGR settings:
-
-```bash
-bash runjobs.sh --help
-```
+`PDGR` is adapted from
+[EntanglementDetection.jl](https://github.com/ZIB-IOL/EntanglementDetection.jl)
+and ships as a source folder loaded by the main project, so nothing extra is
+installed. It takes the same `-t`, `--seed` and `--log-level` options as the
+other codes; its own settings are listed by `bash runjobs.sh --help`. Bounds
+found before a timeout are saved. Provenance and changes:
+[`lib/PDGR/NOTICE`](lib/PDGR/NOTICE).
 
 ## Result files
 
 ```
 ub_relx / lb_relx / ub_heur / feas_heur / time     reported values
 relaxation / seed / julia / host                   provenance
+peak_rss_mib                                       peak memory (Table 1)
 relax_nvars / relax_ncons / relax_nnz              root relaxation size
 mem_total_* / mem_cp_* / mem_lmo_* / mem_ladmm_*   memory per level (nested)
 ```
@@ -207,6 +219,8 @@ export EXACTENT_NO_DIAGNOSTICS=1
 src/            the ExactEntanglement package (sbb/, cuttingplane/, solvers/)
 lib/PDGR/       PDGR source adapted from EntanglementDetection.jl
 benchmark/      input instances
+data/           exact thresholds from the literature; published PDGR values (fallback)
+test/           Julia and Python tests
 scripts/        experiment drivers (exp_*.sh) and analysis (make_*.py)
 results/        output
 ```

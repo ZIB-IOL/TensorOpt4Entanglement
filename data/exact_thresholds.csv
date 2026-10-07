@@ -1,0 +1,18 @@
+# Exact white-noise thresholds S(phi||Id) from the literature, for the states
+# where one is known. rho(z) = (1-z) phi + z Id/2^m; the sources write the
+# visibility p = 1 - z.
+#   GHZ_m:      1 - 1/(1 + 2^(m-1))                  Dur2000classification
+#   Cluster_4:  8/9 (linear four-qubit cluster)      chen2016matched
+#   Dicke_m_1:  1 - 1/(1 + 2^m sqrt((m-1)/(2m)))     chen2020noise, Eq. (8), exact for m <= 5
+#   Dicke_3_2:  equal to Dicke_3_1 (local X^{(x)3})  chen2020noise
+#   Dicke_4_2:  32/35 (Eq. (18) with u = v = 1)      chen2020noise
+instance,value,cite
+GHZ_3,0.8,Dur2000classification
+GHZ_4,0.8888888888888888,Dur2000classification
+GHZ_5,0.9411764705882353,Dur2000classification
+Cluster_4,0.8888888888888888,chen2016matched
+Dicke_3_1,0.8220261236,chen2020noise
+Dicke_3_2,0.8220261236,chen2020noise
+Dicke_4_1,0.9073899056,chen2020noise
+Dicke_4_2,0.9142857142857143,chen2020noise
+Dicke_5_1,0.9529158663,chen2020noise

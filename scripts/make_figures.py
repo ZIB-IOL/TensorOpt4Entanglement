@@ -75,7 +75,10 @@ def fig_bounds(out, data):
     rows, labels, pdgr_pts = [], [], []
     for st, (name, m) in order:
         g = lambda a, k: (load_result(dirs, st, a) or {}).get(k)
-        ubs = [v for v in (g("Alt-SDP", "glbub"), g("CP", "glbub"), g("IR", "glbub"))
+        # the best upper bound over every method in the tables, PDGR included,
+        # so the marker matches the bold entry of Tables 2-4
+        pu = (pdgr.get(display_name(name)) or {}).get("ub")
+        ubs = [v for v in (g("Alt-SDP", "glbub"), g("CP", "glbub"), g("IR", "glbub"), pu)
                if v and math.isfinite(v) and v > 0]
         lbs = {a: g(a, "glblb") for a in ("CP", "IR", "DPS", "DDPS+")}
         lbs = {a: v for a, v in lbs.items() if v is not None and math.isfinite(v)}
@@ -183,7 +186,7 @@ def fig_bounds(out, data):
 \\end{{tikzpicture}}
 \\caption{{}}\\label{{fig.prof.lb}}
 \\end{{subfigure}}
-\\caption{{\\lid{{Upper and Lower Bound:
+\\caption{{\\lid{{Upper and lower bound:
 \\subref{{fig.bounds.inst}} per instance; \\subref{{fig.prof.lb}} performance
 profile of $\\lb_{{\\relx}}$.}}}}
 \\label{{fig.profiles}}

@@ -20,7 +20,11 @@ HEAD = (r"    \textbf{Algorithm} & $m=3$ & $m=4$ & $m=5$ & \textbf{SGM} \\")
 SIZES = (3, 4, 5)
 SHIFT = 1.0   # GiB; the ranking is unchanged for shifts 0 to 10
 
-TABLES = {"mem": dict(m=None, rows=ROWS, experiment="exp_main.sh",
+# PDGR is run by the same runner and records its peak memory too; it sits
+# after Alt-SDP, as in the results tables.
+MEM_ROWS = ROWS[:1] + [("PDGR", "PDGR", False)] + ROWS[1:]
+
+TABLES = {"mem": dict(m=None, rows=MEM_ROWS, experiment="exp_main.sh",
                       label="tab.mem", caption=None)}
 
 

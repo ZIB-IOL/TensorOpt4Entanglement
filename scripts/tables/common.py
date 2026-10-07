@@ -174,6 +174,26 @@ def label_of(algo, text, emph):
 
 
 PDGR_CSV = os.path.join(ROOT, "data", "pdgr.csv")
+EXACT_CSV = os.path.join(ROOT, "data", "exact_thresholds.csv")
+
+
+def load_exact():
+    """Known exact thresholds by display name: (value, bibtex key)."""
+    out = {}
+    if os.path.isfile(EXACT_CSV):
+        with open(EXACT_CSV) as fh:
+            for r in csv.DictReader(l for l in fh if not l.startswith("#")):
+                out[r["instance"]] = (float(r["value"]), r["cite"])
+    return out
+
+
+def state_cell(name, exact=None):
+    """State label, with the known exact threshold and its source underneath."""
+    if exact is None:
+        return escape(name)
+    value, cite = exact
+    return (f"\\shortstack[l]{{{escape(name)}\\\\ \\scriptsize"
+            f"\\lid{{$\\opt={value:.5f}$~\\cite{{{cite}}}}}}}")
 
 
 def load_pdgr(result_dirs=None):
@@ -198,7 +218,7 @@ def load_pdgr(result_dirs=None):
     return out
 
 
-def bounds_block(ctx, m, rows, pdgr_placeholder=False):
+def bounds_block(ctx, m, rows, pdgr_placeholder=False, known=False):
     """The bounds table shared by the results, rank-sweep and ablation tables.
 
     Columns: ub_relx, lb_relx, ub_heur, feas_heur, time. The best upper and
@@ -208,6 +228,7 @@ def bounds_block(ctx, m, rows, pdgr_placeholder=False):
     """
     out = []
     pdgr = load_pdgr(ctx.result_dirs) if pdgr_placeholder else {}
+    exact = load_exact() if known else {}
     for state in ctx.states(m):
         recs = {a: load_result(ctx.result_dirs, state, a) for a, _, _ in rows}
         rnd = lambda v: round(v, 5)
@@ -224,7 +245,8 @@ def bounds_block(ctx, m, rows, pdgr_placeholder=False):
 
         out.append("\\midrule")
         nrow = len(rows) + (1 if pd else 0)
-        out.append(f"\\multirow{{{nrow}}}{{*}}{{{escape(ctx.name(state))}}}")
+        cell = state_cell(ctx.name(state), exact.get(display_name(ctx.name(state))))
+        out.append(f"\\multirow{{{nrow}}}{{*}}{{{cell}}}")
         for algo, text, emph in rows:
             shown = label_of(algo, text, emph)
             r = recs[algo]
