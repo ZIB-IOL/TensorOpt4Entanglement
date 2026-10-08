@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 function minimizeQuadraticOnUnitInterval(a, b, c)
-    if abs(a) < 1e-12
+    if iszero(a)
         zstar = b > 0 ? 0.0 : 1.0
     else
         zstar = -b / (2a)

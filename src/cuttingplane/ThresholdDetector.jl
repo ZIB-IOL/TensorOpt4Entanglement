@@ -61,6 +61,7 @@ function clearStates(detector::ThresholdEntanglementDetector, clearall = false)
         detector.purestates = []
         detector.substates = []
         detector.ispersistent = []
+        empty!(detector.persistentInds)
     else
         println("clear non persistent states ", length(detector.persistentInds))
         detector.purestates = [detector.purestates[ind] for ind in detector.persistentInds]
@@ -152,12 +153,19 @@ function refinementBudget(param::Param)
     return (param.loop, false, false)
 end
 
+"Skip a zero-iteration lift when IR reaches its reserved CP phase."
+function irShouldLift(param::Param, singlerun; elapsed = elapsedTime(param))
+    return singlerun || param.is_last || elapsed < (1 - param.tratio) * param.time_limit
+end
+
 """
     initialActiveSet(HR, HI, dims, param) -> (detector, weights, nzpure, nzsub)
 
 Build the initial inner approximation `P_1`: the maximally mixed state (retained
 across IR iterations) padded with random product states up to
-`param.pointsize_bound`, plus the starting convex weights. `nzpure`/`nzsub` are
+`param.pointsize_bound`, plus the starting convex weights. All `prod(dims)`
+computational basis states are retained even when that point bound is smaller.
+`nzpure`/`nzsub` are
 the tail components carried over when `pointsize_bound > rank_bound`.
 """
 function initialActiveSet(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
@@ -166,7 +174,7 @@ function initialActiveSet(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector
 
     identitystate = Dict(:RE => [Matrix(Diagonal(ones(dim))) / dimH for dim in dims],
                          :IM => [zeros(dim, dim) for dim in dims])
-    addRank1State(detector, identitystate, nothing, nothing, true, false, param.pointsize_bound)
+    addRank1State(detector, identitystate, nothing, nothing, true, false)
     npersistent = length(detector.substates)
 
     purestates_, substates_ = complementStates(dims, param.pointsize_bound, npersistent)
@@ -198,6 +206,56 @@ function selectTopFactors(weights, rank_bound::Int, arrays...)
     w = weights[selected]
     w ./= sum(w)
     return (w, map(a -> a[selected], arrays)...)
+end
+
+"Trim a real CP packet without splitting its adjacent conjugate pairs."
+function selectConjugateFactors(weights, rank_bound::Int, purestates, substates)
+    length(weights) == length(purestates) == length(substates) ||
+        throw(DimensionMismatch("Factor arrays and weights must have the same length"))
+    length(weights) <= rank_bound &&
+        return selectTopFactors(weights,rank_bound,substates,purestates)
+    singles = Int[]
+    pairs = Tuple{Int,Int}[]
+    index = 1
+    while index <= length(weights)
+        P = purestates[index]
+        paired = index < length(weights) && weights[index] == weights[index+1] &&
+            any(x -> !iszero(imag(x)),P) && size(P) == size(purestates[index+1]) &&
+            all(x == conj(y) for (x,y) in zip(P,purestates[index+1]))
+        if paired
+            push!(pairs,(index,index+1))
+            index += 2
+        else
+            push!(singles,index)
+            index += 1
+        end
+    end
+    sort!(singles;by=index -> weights[index],rev=true)
+    sort!(pairs;by=pair -> weights[pair[1]]+weights[pair[2]],rev=true)
+    single_mass = vcat(0.0,cumsum(weights[singles]))
+    pair_mass = vcat(0.0,cumsum([weights[a]+weights[b] for (a,b) in pairs]))
+    best_mass, best_singles, best_pairs = -Inf, 0, 0
+    # With nonnegative weights, the best packet for each number of pairs
+    # uses the heaviest remaining singletons. Enumerating pair counts therefore
+    # maximises retained mass under the existing cardinality limit.
+    for count in 0:min(length(pairs),fld(rank_bound,2))
+        nsingles = min(length(singles),rank_bound-2count)
+        mass = single_mass[nsingles+1]+pair_mass[count+1]
+        if mass > best_mass
+            best_mass, best_singles, best_pairs = mass, nsingles, count
+        end
+    end
+    selected = copy(singles[1:best_singles])
+    for (a,b) in pairs[1:best_pairs]
+        push!(selected,a,b)
+    end
+    # At rank one an all-pair packet has no nonempty complete group. Keep
+    # the ordinary truncation in that case rather than return an empty lift.
+    isempty(selected) && return selectTopFactors(weights,rank_bound,substates,purestates)
+    sort!(selected;by=index -> weights[index],rev=true)
+    w = weights[selected]
+    w ./= sum(w)
+    return w, substates[selected], purestates[selected]
 end
 
 """
@@ -243,10 +301,13 @@ function flipMultipliers!(multipliers)
 end
 
 "Construct a consistent lifted warm start after support filtering and rank trimming."
-function irWarmStart(purestates, substates, weights, rank_bound, H, ub, multipliers, param)
-    w, sub, pure = selectTopFactors(weights, rank_bound, substates, purestates)
+function irWarmStart(purestates, substates, weights, rank_bound, H, ub, multipliers, param;
+                     fresh_cp = false, refit_scalar = param.ir_refit_scalar)
+    w, sub, pure = fresh_cp && param.cp_real_master && all(iszero,imag(H)) ?
+        selectConjugateFactors(weights,rank_bound,purestates,substates) :
+        selectTopFactors(weights,rank_bound,substates,purestates)
     z = 1 - ub
-    if param.ir_refit_scalar
+    if refit_scalar
         D = size(H, 1)
         mixed = Matrix{ComplexF64}(I, D, D) / D
         B = H - mixed
@@ -274,6 +335,9 @@ Iterative refinement (IR): alternate LADMM on the lifted nonconvex problem with
 the cutting-plane master, each warm-starting the other.
 """
 function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+    dimH = prod(dims)
+    all(iszero, HI) && HR == Matrix{Float64}(I, dimH, dimH) / dimH &&
+        return (0.0, 0.0, 0.0, 0.0, 1.0)
     maxi, singlerun, clearall = refinementBudget(param)
 
     separateproblem = Problem(HR, HI, dims)
@@ -291,25 +355,38 @@ function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, 
     seed_purestates, seed_substates = detector.purestates, detector.substates
     H = HR + im * HI
     snapshot_state = Ref{Union{Nothing,MasterSnapshot}}(nothing)
+    ladmm_warm_state = Ref{Any}(nothing)
+    priced_columns = (pure=Any[], sub=Any[])
 
     for i in 1:maxi
         println("Lifting-discretization iteration: $i / $(param.loop)")
-        detector.round = 2 * i - 1
-        weights, substates, z, multipliers = irWarmStart(seed_purestates,
-            seed_substates, weights, param.rank_bound, H, seed_upper, multipliers, param)
+        lifted_solution = (seed_purestates, seed_substates, weights, seed_upper)
+        if irShouldLift(param, singlerun)
+            detector.round = 2 * i - 1
+            weights, substates, z, multipliers = irWarmStart(seed_purestates,
+                seed_substates, weights, param.rank_bound, H, seed_upper, multipliers, param;
+                fresh_cp=param.cp_real_master && all(iszero,HI) &&
+                    !isnothing(snapshot_state[]) && isnothing(ladmm_warm_state[]),
+                refit_scalar=param.ir_refit_scalar && isnothing(ladmm_warm_state[]))
 
-        candidates = (pure=Any[], sub=Any[])
-        candidate_offset = isnothing(snapshot_state[]) ? -Inf : snapshot_state[].offset
-        # LADMM on the lifted problem (paper Alg. LADMM)
-        purestates, substates, approxub, approxfeas, lifted_weights =
-            ladmmSolve(detector, dims, H, substates, weights, z, multipliers, param, i == 1, singlerun;
-                candidate_pool=candidates, candidate_offset=candidate_offset)
-        lifted_solution = (purestates, substates, lifted_weights, approxub)
+            candidates = (pure=Any[], sub=Any[])
+            candidate_offset = isnothing(snapshot_state[]) ? -Inf : snapshot_state[].offset
+            # LADMM on the lifted problem (paper Alg. LADMM)
+            purestates, substates, approxub, approxfeas, lifted_weights =
+                ladmmSolve(detector, dims, H, substates, weights, z, multipliers, param, i == 1, singlerun;
+                    candidate_pool=candidates, candidate_offset=candidate_offset,
+                    warm_state=ladmm_warm_state)
+            lifted_solution = (purestates, substates, lifted_weights, approxub)
 
-        clearStates(detector, clearall)
-        addBatchStates(detector, purestates, substates, param.lazification)
-        addBatchStates(detector, candidates.pure, candidates.sub, param.lazification)
-        addBatchStates(detector, nz_purestates, nz_substates, false)
+            clearStates(detector, clearall)
+            addBatchStates(detector, purestates, substates, param.lazification)
+            addBatchStates(detector, candidates.pure, candidates.sub, param.lazification)
+            addBatchStates(detector, nz_purestates, nz_substates, false)
+        else
+            # Keep the current master and heuristic diagnostics. A capped CP
+            # pass may have priced one final column without adding it yet.
+            addBatchStates(detector, priced_columns.pure, priced_columns.sub, false)
+        end
 
         # Cutting-plane master (paper Alg. CP)
         detector.round = 2 * i
@@ -318,6 +395,7 @@ function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, 
         end
         saved_maxrounds = param.maxrounds
         previous_snapshot = snapshot_state[]
+        priced_columns = (pure=Any[], sub=Any[])
         local lb, terminate, weights_sum
         if param.cp_rounds_per_ir > 0 && !singlerun
             param.maxrounds = saved_maxrounds < 0 ? param.cp_rounds_per_ir :
@@ -326,7 +404,7 @@ function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, 
         try
             ub, lb, terminate, purestates, substates, weights, multipliers, weights_sum =
                 cuttingPlane(detector, separateproblem, param, 1, singlerun;
-                    lower_bound=glblb, snapshot_state=snapshot_state)
+                    lower_bound=glblb, snapshot_state=snapshot_state, pricing_pool=priced_columns)
         finally
             param.maxrounds = saved_maxrounds
         end
@@ -335,10 +413,16 @@ function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, 
 
         # Keep the certified CP support in the next master, while a failed
         # crossover must not erase progress made by the nonconvex solver.
-        nz_purestates, nz_substates, _ = activeFactors(purestates, substates, weights)
+        # A tiny positive LP coefficient can still be essential to the face
+        # containing the target. Preserve the complete certificate support in
+        # the master; the lifted warm start retains its separate rank filter.
+        nz_purestates, nz_substates, _ = activeFactors(purestates, substates, weights; tol=0.0)
+        append!(nz_purestates, priced_columns.pure)
+        append!(nz_substates, priced_columns.sub)
         seed_purestates, seed_substates, weights, seed_upper = irNextSeed(snapshot_state[],
             previous_snapshot, (purestates, substates, weights, ub), lifted_solution)
         approxweights = weights_sum
+        snapshot_state[] === previous_snapshot || (ladmm_warm_state[] = nothing)
         flipMultipliers!(multipliers)
 
         println("Terminated at iteration $i with number of substates: $(length(weights)), glbub: $glbub, glblb: $glblb, approxub: $approxub, approxweights: $approxweights")
@@ -362,6 +446,9 @@ Standalone cutting-plane algorithm (CP): no lifted heuristic, one master solve
 refined by the sBB oracle until the bounds meet.
 """
 function solveCP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+    dimH = prod(dims)
+    all(iszero, HI) && HR == Matrix{Float64}(I, dimH, dimH) / dimH &&
+        return (0.0, 0.0, 0.0, 0.0)
     separateproblem = Problem(HR, HI, dims)
     detector, _, _, _ = initialActiveSet(HR, HI, dims, param)
     ub, lb, _, _, _, _, _, _ = cuttingPlane(detector, separateproblem, param, 1)

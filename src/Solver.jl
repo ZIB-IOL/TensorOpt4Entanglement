@@ -17,14 +17,17 @@ function classifyStatus(sense, status, primal_status, dual_status, primalobj, du
    if status == INFEASIBLE || dual_status == INFEASIBILITY_CERTIFICATE
       return infeasible_tag
    elseif status in (OPTIMAL, SLOW_PROGRESS, ITERATION_LIMIT, TIME_LIMIT)
-      nosolution = primal_status == NO_SOLUTION || dual_status == NO_SOLUTION ||
-         !isfinite(primalobj) || !isfinite(dualobj) ||
-         (unknown_is_nosolution &&
-          (primal_status == UNKNOWN_RESULT_STATUS || dual_status == UNKNOWN_RESULT_STATUS))
-      if status == TIME_LIMIT
-         feasible = (MOI.FEASIBLE_POINT, MOI.NEARLY_FEASIBLE_POINT)
-         nosolution |= !(primal_status in feasible && dual_status in feasible)
-      end
+      # Objective values alone do not establish primal/dual feasibility. In
+      # particular, slow-progress and iteration-limit results can carry finite
+      # objectives at infeasible or unknown points. Such dual objectives must
+      # not prune sBB nodes or certify a CP bound. Keep nearly feasible points
+      # under the same numerical tolerance policy used for time-limited solves;
+      # these remain numerical results, rather than exact certificates.
+      # `unknown_is_nosolution` is retained for existing callers, but an unknown
+      # result can never be used as a feasible solution or an objective bound.
+      feasible = (MOI.FEASIBLE_POINT, MOI.NEARLY_FEASIBLE_POINT)
+      nosolution = !(primal_status in feasible && dual_status in feasible) ||
+         !isfinite(primalobj) || !isfinite(dualobj)
       if nosolution
          return RelaxNoSolution
       elseif sense == JuMP.MIN_SENSE && primalobj + obj_tol < dualobj

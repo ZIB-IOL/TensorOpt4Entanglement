@@ -118,6 +118,39 @@ end
     @test root.ZBs[1][:IM,:U][2,1] == 0.2
 end
 
+@testset "OBBT preserves every point of narrow intervals" begin
+    problem = E.Problem(Matrix{Float64}(I, 4, 4) / 4, zeros(4, 4), [2, 2])
+    root = E.createRootNode(problem.dims, problem.BST, problem.Zdims, 1e-6, [], problem.fixvars)
+    z = problem.Zleafids[1]
+    for part in (:RE, :IM)
+        node = deepcopy(root)
+        @test E.tightenOBBTEntryBounds!(node, z, part, 1, 2, 0.25, 0.25 + 5e-7, 1e-6)
+        @test !haskey(node.fixvars, (z, part, 1, 2))
+        @test node.ZBs[z][part, :L][1, 2] == 0.25
+        @test node.ZBs[z][part, :U][1, 2] == 0.25 + 5e-7
+        # Both endpoints are valid PSD trace-one local states. Their tensor
+        # product with |0><0| is feasible; midpoint fixing excludes them.
+        for value in (0.25, 0.25 + 5e-7)
+            offdiag = part === :RE ? value : im * value
+            localstate = ComplexF64[0.5 offdiag; conj(offdiag) 0.5]
+            @test minimum(eigvals(Hermitian(localstate))) > 0
+            @test real(tr(localstate)) == 1
+            @test real(tr(kron(localstate, ComplexF64[1 0; 0 0]))) == 1
+            @test node.ZBs[z][part, :L][1, 2] <= value <= node.ZBs[z][part, :U][1, 2]
+        end
+        before = deepcopy(node.ZBs)
+        # Conflicting dual bounds within tolerance do not narrow an interval
+        # to an arbitrary equality or turn it into an infeasibility proof.
+        @test E.tightenOBBTEntryBounds!(node, z, part, 1, 2, 0.25 + 7e-7, 0.25 + 5e-7, 1e-6)
+        @test node.ZBs == before
+        @test !haskey(node.fixvars, (z, part, 1, 2))
+        @test !E.tightenOBBTEntryBounds!(node, z, part, 1, 2, 0.3, 0.25, 1e-6)
+        @test node.ZBs == before
+        @test E.tightenOBBTEntryBounds!(node, z, part, 1, 2, 0.25, 0.25, 1e-6)
+        @test node.fixvars[(z, part, 1, 2)] == 0.25
+    end
+end
+
 @testset "Certifying relaxations retain products excluded by proximal cuts" begin
     # A normalised GHZ witness perturbed along X ⊗ Z ⊗ |0><0|. Its maximum
     # with the last two factors fixed at |0> is positive, but the old proximal

@@ -1,6 +1,26 @@
 using Test, LinearAlgebra, Random, Zygote
 const E = ExactEntanglement
 
+@testset "CP termination uses the certified master upper bound" begin
+    detector = E.ThresholdEntanglementDetector(zeros(4,4),zeros(4,4),[2,2],[],[])
+    p = Param(log_level=0)
+    upper = 0.8
+    selected_objective = upper - 100p.master_obj_tol
+    terminate,addstate,lower = E.checkTerminationGap(detector,selected_objective,
+        0.2,0.2,0.2,0.0,p;master_upper=upper)
+    @test !terminate && !addstate
+    @test lower == selected_objective
+    terminate,addstate,lower = E.checkTerminationGap(detector,upper,
+        0.2,0.2,0.2,0.0,p;master_upper=upper)
+    @test terminate && !addstate
+    @test lower == upper
+    previous_lower = upper - p.master_obj_tol/2
+    terminate,addstate,lower = E.checkTerminationGap(detector,selected_objective,
+        0.2,1.0,0.2,previous_lower,p;master_upper=upper)
+    @test terminate && !addstate
+    @test lower < previous_lower
+end
+
 @testset "Lift (Psi)" begin
     dims = [2, 2, 2]; nsubs = length(dims); dimH = prod(dims)
     sumdim = sum(dims); cdims = E.cumulativeAdd!(copy(dims))
@@ -42,6 +62,14 @@ const E = ExactEntanglement
         @test all(norm(v) ≈ 1 for s in S for v in s)
         @test sum(W[j]*P[j] for j in eachindex(W)) ≈ y
         @test all(P[j] ≈ foldl(kron,[v*v' for v in S[j]]) for j in eachindex(W))
+
+        small = [1-5e-10, 5e-10]
+        tiny_p, tiny_rank = E.packFactors(subs[1:2], small, 2, sumdim, dims, cdims, nsubs)
+        @test tiny_rank == 2
+        tiny_model = E.LiftModel(tiny_rank, dims, nsubs)
+        @test E.fastTrace(tiny_model,tiny_p) ≈ 1 atol=1e-14
+        @test E.liftMap(tiny_model,tiny_p) ≈
+            sum(small[j]*foldl(kron,[v*v' for v in subs[j]]) for j in 1:2) atol=1e-14
     end
 
     @testset "retraction keeps unit trace" begin
@@ -64,6 +92,44 @@ const E = ExactEntanglement
         E.fastProjTangent!(M,Y,q,X)
         normal = Zygote.gradient(x -> real(tr(E.liftMap(M,x))),q)[1]
         @test abs(dot(normal,Y)) <= 1e-12 * norm(normal) * norm(Y)
+    end
+
+    @testset "retraction recovers invalid tangent trials" begin
+        model = E.LiftModel(1, dims, nsubs)
+        base = zeros(2sumdim)
+        base[[1,5,9]] = [0.01,0.01,10000.0]
+        tangent = zeros(length(base))
+        tangent[[1,5]] = [-0.01,0.01]
+        projected = similar(tangent)
+        E.fastProjTangent!(model,projected,base,tangent)
+        @test projected ≈ tangent atol=1e-15
+        @test norm(tangent) < E.max_stepsize(model)
+        @test E.fastTrace(model,base) ≈ 1
+        @test E.fastTrace(model,base+tangent) == 0
+
+        for inplace in (false,true)
+            input = copy(base)
+            output = inplace ? input : similar(input)
+            @test E.retract_project!(model,output,input,tangent) === output
+            @test all(isfinite,output)
+            @test output == base
+            @test E.fastTrace(model,output) ≈ 1
+
+            # The next smaller trial uses the original normalization formula.
+            trial = base + 0.5tangent
+            expected = trial / E.fastTrace(model,trial)^(1/(2nsubs))
+            E.retract_project!(model,output,input,0.5tangent)
+            @test output ≈ expected atol=1e-14
+            @test output != base
+            @test E.fastTrace(model,output) ≈ 1
+        end
+
+        invalid = fill(Inf,length(base))
+        output = similar(base)
+        E.retract_project!(model,output,base,invalid)
+        @test output == base
+        E.retract_project!(model,output,output,invalid)
+        @test output == base
     end
 
     @testset "analytic gradient matches AD" begin
@@ -94,7 +160,58 @@ const E = ExactEntanglement
             cached_l(M,q .+ 0.02)
             @test cached_grad(M,q) ≈ fastgrad(M,q) atol=1e-10
         end
+
+        # The updated Lagrangian gradient includes both inner-solve error
+        # and the scalar block's movement, with the unscaled ADMM multiplier.
+        inner_gradient = fastgrad(M,p)
+        scalar_change = 0.1
+        chi .+= 2 * 1.7 .* (E.liftMap(M,p)-(0.4Mdir+Min))
+        direction_gradient = zeros(length(p))
+        E.liftGradient!(M,direction_gradient,p,Mdir,nothing)
+        E.fastProjTangent!(M,direction_gradient,p,direction_gradient)
+        @test grad_l(M,p) ≈ inner_gradient-2 * 1.7 * scalar_change * direction_gradient atol=1e-10
     end
+end
+
+@testset "LADMM Wolfe search terminates at floating-point brackets" begin
+    M = E.Manifolds.Euclidean(1)
+    p = [0.0]
+    cost = (M,p) -> p[1]
+    gradient = (M,p) -> [1.0]
+    problem = E.Manopt.DefaultManoptProblem(M,
+        E.Manopt.ManifoldGradientObjective(cost,gradient))
+    search = E.Manopt.WolfePowellLinesearchStepsize(M;p=copy(p),X=zeros(1),
+        max_stepsize=0.1,stop_when_stepsize_less=1e-10)
+    guard = E.LADMMWolfeGuard(search)
+    state = E.Manopt.QuasiNewtonState(M;p=copy(p),X=gradient(M,p),stepsize=guard)
+    @test search.stop_when_stepsize_less == 1e-10
+
+    # A linear objective has constant directional derivative, so Wolfe's
+    # curvature condition never holds. A tiny direction makes the scalar
+    # bracket large enough that its adjacent floats exceed the old tolerance.
+    direction = [-1e-8]
+    cap = min(1e9,search.max_stepsize/norm(direction))
+    @test cap == 1e7
+    step = guard(problem,state,1,direction)
+    @test isfinite(step) && 0 < step <= 2cap
+    @test cost(M,p+step*direction) <=
+        cost(M,p)+search.sufficient_decrease*step*dot(gradient(M,p),direction)
+    @test search.stop_when_stepsize_less == max(1e-10,8eps(cap))
+    @test E.Manopt.get_last_stepsize(guard) == step
+    lo = 2cap; hi = nextfloat(lo)
+    @test (lo+hi)/2 in (lo,hi)
+    @test hi-lo > 1e-10
+    @test hi-lo <= search.stop_when_stepsize_less
+
+    # The safeguard must reset, rather than retain a large scalar tolerance.
+    step = guard(problem,state,2,[-1.0])
+    @test isfinite(step) && step > 0
+    @test search.stop_when_stepsize_less == 1e-10
+    @test E.Manopt.get_last_stepsize(guard) == step
+    @test guard(problem,state,3,[0.0]) == 1.0
+    @test search.stop_when_stepsize_less == max(1e-10,8eps(1e9))
+    guard(problem,state,4,[-1.0])
+    @test search.stop_when_stepsize_less == 1e-10
 end
 
 @testset "LADMM controls" begin
@@ -109,6 +226,43 @@ end
     @test E.ladmmPenalty(0.1, 0.0, 1.0, 0.1, :balance) == 0.1
     @test E.ladmmPenalty(5.0, 1.0, 0.01, 0.1, :legacy) == 12.5
     @test_throws ArgumentError Param(heur_LADMM_penalty_update=:invalid)
+
+    requested = (1e-6, 1e-5, 1e-5)
+    @test E.ladmmInnerTolerances(requested..., 0.0, false) == requested
+    @test E.ladmmInnerTolerances(requested..., 1.0, true) == requested
+    forcing = E.ladmmInnerTolerances(requested..., 1e-3, true)
+    @test forcing[1] ≈ 5e-8
+    @test forcing[2:3] == requested[2:3]
+    tighter = E.ladmmInnerTolerances(requested..., 1e-6, true)
+    @test all(tighter .<= forcing)
+    @test tighter[2] ≈ 1e-7
+    @test tighter[3] ≈ 1e-7
+    # Positive floors avoid requesting exact stationarity and never weaken a
+    # stricter user request.
+    @test E.ladmmInnerTolerances(requested..., 0.0, true) == (1e-12, 1e-9, 1e-7)
+    stricter = (1e-14, 1e-11, 1e-9)
+    @test E.ladmmInnerTolerances(stricter..., 0.0, true) == stricter
+
+    stopping = Param(feas_tol=1e-6, master_obj_tol=1e-6)
+    stable = fill(0.8, 4)
+    # Inner cost tolerances must not silently demand tighter outer feasibility.
+    @test E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, stable, stopping, true)
+    @test !E.ladmmConverged(2e-6, 1e-7, 1e-12, 1e-6, stable, stopping, true)
+    @test !E.ladmmConverged(8e-7, 2e-6, 1e-12, 1e-6, stable, stopping, true)
+    @test !E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, stable[1:3], stopping, true)
+    # Several small objective changes can still accumulate appreciable progress.
+    changing = 0.8 .+ (0:3) .* 5e-7
+    @test !E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, changing, stopping, true)
+    @test !E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, stable, stopping, false)
+    @test E.ladmmConverged(8e-7, 1e-7, 1e-6, 1e-6, Float64[], stopping, false)
+
+    # A worse raw objective can be useful when the final infeasibility makes
+    # that objective uncertain. A much worse objective or equal residual is
+    # not retained, and the identity direction cannot supply a scalar band.
+    @test E.ladmmKeepEarlierPoint(1e-4, 0.9001, 1e-3, 0.9, 1.0, 1e-6)
+    @test !E.ladmmKeepEarlierPoint(1e-4, 0.91, 1e-3, 0.9, 1.0, 1e-6)
+    @test !E.ladmmKeepEarlierPoint(1e-3, 0.9, 1e-3, 0.9, 1.0, 1e-6)
+    @test !E.ladmmKeepEarlierPoint(1e-4, 0.9, 1e-3, 0.9, 0.0, 1e-6)
 
     # An exhausted budget returns the initial decomposition with its actual
     # residual, rather than falsely reporting feasibility without a solve.
@@ -135,6 +289,107 @@ end
     pure, _, _, residual, weights = E.ladmmSolve(nothing, dims, H, subs, [1.0], 0.5, chi, param)
     @test isfinite(residual)
     @test real(tr(sum(weights[i] * pure[i] for i in eachindex(weights)))) ≈ 1.0
+end
+
+@testset "LADMM continues its dual state after a failed CP pass" begin
+    dims = [2, 2]
+    D = prod(dims)
+    H = Matrix{ComplexF64}(I, D, D) / D
+    subs = [[ComplexF64[1, 0] for _ in dims]]
+    chi = Dict(:RE=>zeros(D, D), :IM=>zeros(D, D))
+    param = Param(time_limit=60.0, log_level=0, heur_LADMM_rho=3.0,
+        heur_LADMM_penalty_update=:balance, heur_LADMM1_maxiter=1,
+        heur_LADMM_maxiter=1, heur_MANOPT1_maxiter=2, heur_MANOPT_maxiter=2)
+    state = Ref{Any}(nothing)
+    pure, sub, ub, _, weights = E.ladmmSolve(nothing, dims, H, subs, [1.0],
+        0.5, chi, param; warm_state=state)
+    residual = pure[1] - H
+    first = state[]
+    @test first.multipliers ≈ 6residual
+    @test first.penalty == 6.0
+    @test iszero(norm(chi[:RE])) && iszero(norm(chi[:IM]))
+
+    # With the same primal iterate, restarting from the old CP multiplier
+    # would repeat 6R. Continuation instead applies the next update to 6R,
+    # using the carried penalty: 6R + 2*6R = 18R.
+    E.ladmmSolve(nothing, dims, H, sub, weights, 1-ub, chi, param;
+        warm_state=state)
+    @test state[].multipliers ≈ 18residual
+    @test state[].penalty == 12.0
+    @test first.multipliers ≈ 6residual
+
+    # Budget exhaustion must retain a copied state without an extra update.
+    expired = Param(time_limit=1.0, start_time=time()-2, log_level=0)
+    saved = state[]
+    E.ladmmSolve(nothing, dims, H, sub, weights, 1-ub, chi, expired;
+        warm_state=state)
+    @test state[].multipliers == saved.multipliers
+    @test state[].multipliers !== saved.multipliers
+    @test state[].penalty == saved.penalty
+    wrong = Ref{Any}((multipliers=zeros(ComplexF64, 2, 2), penalty=1.0))
+    @test_throws DimensionMismatch E.ladmmSolve(nothing, dims, H, sub,
+        weights, 1-ub, chi, expired; warm_state=wrong)
+end
+
+@testset "LADMM keeps large CP multipliers and scalar stationarity" begin
+    dims = [2,2]; D = prod(dims)
+    sigma = Matrix{ComplexF64}(I,D,D)/D
+    epsilon = 1e-4
+    H = copy(sigma)
+    H[1,4] = H[4,1] = epsilon
+    B = H-sigma
+    sub = [[ComplexF64[j==index[k] for j in 1:d] for (k,d) in enumerate(dims)]
+        for index in Iterators.product((1:d for d in dims)...)]
+    sub = vec(sub)
+    pure = [foldl(kron,[v*v' for v in s]) for s in sub]
+    weights = fill(1.0/D,D)
+    witness = zeros(ComplexF64,D,D)
+    witness[1,4] = witness[4,1] = 1/(2epsilon)
+    # This is a valid finite-master witness with offset zero and objective 1:
+    # every computational product column has witness value zero.
+    @test real(dot(witness,B)) ≈ 1
+    @test all(iszero(real(dot(witness,P))) for P in pure)
+    @test real(dot(witness,H)) ≈ 1
+    @test minimum(eigvals(Hermitian(H))) > 0
+    chi = Dict(:RE=>real(-witness),:IM=>imag(-witness))
+    param = Param(time_limit=120.0,is_last=true,log_level=0,
+        heur_LADMM1_maxiter=1,heur_LADMM_maxiter=1,
+        heur_MANOPT1_maxiter=2,heur_MANOPT_maxiter=2,
+        heur_LADMM_penalty_update=:balance)
+    state = Ref{Any}(nothing)
+    result = E.ladmmSolve(nothing,dims,H,sub,weights,0.0,chi,param;
+        warm_state=state)
+    @test state[].iterations == 1
+    @test state[].z == 0.0
+    @test maximum(abs,state[].multipliers) > 100
+    @test state[].multipliers[1,4] ≈ -1/(2epsilon)
+    @test real(dot(state[].multipliers,B)) ≈ -1 atol=1e-12
+    # At z=0 the scalar KKT derivative must be nonnegative. The exact z-step
+    # makes it zero here; clipping entries at 100 would instead give -0.98.
+    scalar_gradient = -1-real(dot(state[].multipliers,B))
+    @test abs(scalar_gradient) <= 1e-12
+    clipped = complex.(clamp.(real(state[].multipliers),-100,100),
+        clamp.(imag(state[].multipliers),-100,100))
+    @test -1-real(dot(clipped,B)) < -0.9
+    returned = sum(result[5][j]*result[1][j] for j in eachindex(result[5]))
+    @test result[4] ≈ norm(returned-sigma) atol=1e-14
+    @test result[4] <= 1e-12
+
+    # The fixed point satisfies feasibility and both scalar/manifold KKT
+    # conditions. A high-accuracy solve additionally checks objective stability
+    # across the initial point and three updates, then preserves that history.
+    accurate = Ref{Any}(nothing)
+    E.ladmmSolve(nothing,dims,H,sub,weights,0.0,chi,param,false,true;
+        warm_state=accurate)
+    @test accurate[].iterations == 3
+    @test accurate[].objectives ≈ ones(4)
+    saved_objectives = accurate[].objectives
+    expired = Param(time_limit=1.0,start_time=time()-2,log_level=0)
+    E.ladmmSolve(nothing,dims,H,sub,weights,0.0,chi,expired,false,true;
+        warm_state=accurate)
+    @test accurate[].iterations == 3
+    @test accurate[].objectives == saved_objectives
+    @test accurate[].objectives !== saved_objectives
 end
 
 @testset "LADMM preserves useful intermediate CP columns" begin
@@ -165,6 +420,106 @@ end
     no_violation = (pure=Any[], sub=Any[])
     E.appendLADMMColumns!(no_violation, history, M, work, q, 1.0, 1e-6)
     @test isempty(no_violation.pure)
+
+    # A zero slot is omitted by unpackFactors. Original rank indices must
+    # therefore be selected before unpacking, rather than indexing its output.
+    zero_slot = zeros(2M.sumdim)
+    live, _ = E.packFactors([[zero,zero]],[1.0],1,M.sumdim,dims,M.cdims,2)
+    last, _ = E.packFactors([[one,one]],[1.0],1,M.sumdim,dims,M.cdims,2)
+    zero_history = E.LADMMColumnHistory(vcat(zero_slot,live),[-Inf,1.0],witness)
+    selected = (pure=Any[],sub=Any[])
+    E.appendLADMMColumns!(selected,zero_history,M,work,vcat(zero_slot,last),0.5,1e-6)
+    @test length(selected.pure) == length(selected.sub) == 1
+    @test selected.pure[1] ≈ foldl(kron,[zero*zero',zero*zero'])
+    @test selected.pure[1] ≈ foldl(kron,[v*v' for v in selected.sub[1]])
+end
+
+@testset "LADMM restores the complete lifted iterate on CP fallback" begin
+    dims = [2,2]; D = prod(dims)
+    bell = ComplexF64[1,0,0,1]/sqrt(2)
+    H = bell*bell'
+    rng = MersenneTwister(131)
+    initial = [[normalize(randn(rng,ComplexF64,d)) for d in dims] for _ in 1:4]
+    weights = fill(0.25,4)
+    chi = Dict(:RE=>zeros(D,D),:IM=>zeros(D,D))
+    function continuation_params(iterations)
+        Param(time_limit=120.0,is_last=true,log_level=0,rank_bound=4,
+            heur_LADMM1_maxiter=iterations,heur_LADMM_maxiter=iterations,
+            heur_MANOPT1_maxiter=2,heur_MANOPT_maxiter=2,
+            heur_LADMM_penalty_update=:balance,ir_refit_scalar=true)
+    end
+    mixture(result) = sum(result[5][j]*result[1][j] for j in eachindex(result[5]))
+    uninterrupted_state = Ref{Any}(nothing)
+    uninterrupted = E.ladmmSolve(nothing,dims,H,initial,weights,0.3,chi,
+        continuation_params(2),true;warm_state=uninterrupted_state)
+    continued_state = Ref{Any}(nothing)
+    first = E.ladmmSolve(nothing,dims,H,initial,weights,0.3,chi,
+        continuation_params(1),true;warm_state=continued_state)
+    first_state = continued_state[]
+    p = continuation_params(1)
+    w,s,refitted_z,_ = E.irWarmStart(first[1],first[2],first[5],4,H,first[3],chi,p)
+    @test abs(refitted_z-first_state.z) > 1e-3
+    # Even an incoming scalar refit must not overwrite the saved fallback
+    # iterate. Both calls use equal inner limits, so 1+1 reproduces 2 steps.
+    resumed = E.ladmmSolve(nothing,dims,H,s,w,refitted_z,chi,p;
+        warm_state=continued_state)
+    @test mixture(resumed) ≈ mixture(uninterrupted) atol=1e-11 rtol=1e-11
+    @test resumed[3] ≈ uninterrupted[3] atol=1e-12
+    @test resumed[4] ≈ uninterrupted[4] atol=1e-12
+    @test continued_state[].point ≈ uninterrupted_state[].point atol=1e-11
+    @test continued_state[].multipliers ≈ uninterrupted_state[].multipliers atol=1e-11
+    @test continued_state[].penalty == uninterrupted_state[].penalty
+    @test continued_state[].tolerances == uninterrupted_state[].tolerances
+    @test continued_state[].iterations == uninterrupted_state[].iterations == 2
+
+    # Preserve nonuniform local scales and zero slots, neither of which
+    # survives unpacking and repacking the normalised product factors.
+    zero = ComplexF64[1,0]; one = ComplexF64[0,1]
+    sub = [[zero,zero],[one,one]]
+    M = E.LiftModel(2,dims,2)
+    point,_ = E.packFactors(sub,[0.7,0.3],2,M.sumdim,dims,M.cdims,2)
+    point[1:4] .*= 5
+    point[5:8] ./= 5
+    point = vcat(point,zeros(2M.sumdim))
+    state = Ref{Any}((multipliers=zeros(ComplexF64,D,D),penalty=2.0,
+        point=point,z=0.7,dims=copy(dims),tolerances=(1e-5,1e-4,1e-4),iterations=5))
+    expired = Param(time_limit=1.0,start_time=time()-2,log_level=0)
+    result = E.ladmmSolve(nothing,dims,H,sub,[0.7,0.3],0.1,chi,expired;warm_state=state)
+    @test result[3] ≈ 0.3
+    @test state[].point ≈ point atol=1e-13
+    @test length(state[].point) == 3*2M.sumdim
+    @test length(result[5]) == 2
+    @test state[].iterations == 5
+    @test state[].point !== point
+    @test state[].dims !== dims
+    sigma = Matrix{ComplexF64}(I,D,D)/D
+    @test result[4] ≈ norm(mixture(result)-(sigma+0.7*(H-sigma))) atol=1e-14
+
+    # Older multiplier/penalty-only packets remain usable.
+    legacy = Ref{Any}((multipliers=Matrix{Float64}(I,D,D),penalty=3.0))
+    result = E.ladmmSolve(nothing,dims,H,sub,[0.7,0.3],0.1,chi,expired;warm_state=legacy)
+    @test legacy[].multipliers == Matrix{ComplexF64}(I,D,D)
+    @test legacy[].penalty == 3.0
+    @test result[3] ≈ 0.9
+    bad = Ref{Any}(merge(state[],(dims=[4],)))
+    @test_throws DimensionMismatch E.ladmmSolve(nothing,dims,H,sub,[0.7,0.3],0.1,
+        chi,expired;warm_state=bad)
+    bad[] = merge(state[],(point=Float64[1],))
+    @test_throws DimensionMismatch E.ladmmSolve(nothing,dims,H,sub,[0.7,0.3],0.1,
+        chi,expired;warm_state=bad)
+    # Validate the multiplier first, without reading missing point metadata.
+    bad[] = (multipliers=zeros(ComplexF64,2,2),penalty=1.0,point=Float64[1])
+    @test_throws DimensionMismatch E.ladmmSolve(nothing,dims,H,sub,[0.7,0.3],0.1,
+        chi,expired;warm_state=bad)
+
+    # Returned residuals use the normalised returned mixture even when the
+    # time budget is exhausted before the first manifold retraction.
+    tiny = [1-5e-10,5e-10]
+    target = foldl(kron,[zero*zero',zero*zero'])
+    result = E.ladmmSolve(nothing,dims,target,sub,tiny,1.0,chi,expired)
+    @test length(result[5]) == 2
+    @test result[5][2] > 0
+    @test result[4] ≈ norm(mixture(result)-target) atol=1e-15
 end
 
 @testset "IR data correspondence" begin
@@ -269,4 +624,128 @@ end
     E.clearStates(detector)
     @test detector.ispersistent == [true, true]
     @test length(detector.purestates) == length(detector.ispersistent)
+end
+
+@testset "Fresh real CP seeds preserve conjugate groups" begin
+    dims = [2,2]
+    zero = ComplexF64[1,0]; one = ComplexF64[0,1]
+    xp = (zero+one)/sqrt(2); xm = (zero-one)/sqrt(2)
+    yp = (zero+im*one)/sqrt(2); ym = conj.(yp)
+    sub = [[zero,zero],[one,one],[xp,xp],[xm,xm],[yp,ym],[ym,yp]]
+    pure = [foldl(kron,[v*v' for v in s]) for s in sub]
+    a = 0.95; b = sqrt(1-a^2)
+    psi = ComplexF64[a,0,0,b]; H = psi*psi'
+    upper = 4a*b/(1+4a*b)
+    weights = [(1-upper)*a^2,(1-upper)*b^2,fill(upper/4,4)...]
+    mixed = Matrix{ComplexF64}(I,4,4)/4
+    @test sum(weights[j]*pure[j] for j in eachindex(weights)) ≈
+        (1-upper)*H+upper*mixed atol=1e-14
+    chi = Dict(:RE=>zeros(4,4),:IM=>zeros(4,4))
+    param = Param(cp_real_master=true,ir_refit_scalar=true)
+    w,s,_,_ = E.irWarmStart(pure,sub,weights,4,H,upper,chi,param)
+    Y = sum(w[j]*foldl(kron,[v*v' for v in s[j]]) for j in eachindex(w))
+    @test norm(imag(Y)) > 0.1
+    wf,sf,zf,_ = E.irWarmStart(pure,sub,weights,4,H,upper,chi,param;fresh_cp=true)
+    Yf = sum(wf[j]*foldl(kron,[v*v' for v in sf[j]]) for j in eachindex(wf))
+    @test norm(imag(Yf)) <= 1e-14
+    @test length(wf) == length(sf) <= 4
+    @test sum(wf) ≈ 1
+    @test all(norm(v) ≈ 1 for s in sf for v in s)
+    B = H-mixed
+    @test zf ≈ clamp(real(dot(B,Yf-mixed))/real(dot(B,B)),0.0,1.0)
+    wg,sg,Pg = E.selectConjugateFactors(weights,4,pure,sub)
+    @test wg == wf && sg == sf
+    @test all(Pg[j] ≈ foldl(kron,[v*v' for v in sg[j]]) for j in eachindex(wg))
+
+    # A pair of combined mass 0.6 dominates an isolated mass-0.4 column
+    # under rank two; an all-pair rank-one input remains nonempty.
+    wp,sp,Pp = E.selectConjugateFactors([0.4,0.3,0.3],2,
+        pure[[1,5,6]],sub[[1,5,6]])
+    @test wp ≈ [0.5,0.5]
+    @test Pp == pure[[5,6]] && sp == sub[[5,6]]
+    w1,s1,P1 = E.selectConjugateFactors([0.5,0.5],1,pure[[5,6]],sub[[5,6]])
+    @test length(w1) == length(s1) == length(P1) == 1
+    @test w1 == [1.0]
+    # Unequal weights and unrelated adjacent complex states are singletons.
+    for (packet,packet_sub,packet_weights) in (
+        (pure[[1,5,6]],sub[[1,5,6]],[0.4,0.35,0.25]),
+        (pure[[1,5,3]],sub[[1,5,3]],[0.4,0.3,0.3]))
+        @test E.selectConjugateFactors(packet_weights,2,packet,packet_sub) ==
+            E.selectTopFactors(packet_weights,2,packet_sub,packet)
+    end
+    _,_,z,_ = E.irWarmStart(pure,sub,weights,4,H,upper,chi,param;refit_scalar=false)
+    @test z == 1-upper
+    @test param.ir_refit_scalar
+end
+
+@testset "Fresh CP sign convention gives the correct scalar minimizer" begin
+    dims = [2,2]
+    zero = ComplexF64[1,0]; one = ComplexF64[0,1]
+    sub = [[zero,zero],[one,one]]
+    pure = [foldl(kron,[v*v' for v in s]) for s in sub]
+    weights = [0.7,0.3]
+    psi = ComplexF64[1,0,0,1]/sqrt(2); H = psi*psi'
+    sigma = Matrix{ComplexF64}(I,4,4)/4
+    B = H-sigma
+    witness = B/real(dot(B,B))
+    @test real(dot(witness,B)) ≈ 1
+    chi = -witness
+    Y = sum(weights[j]*pure[j] for j in eachindex(weights))
+    penalty = 7.0
+    quadratic = penalty*real(dot(B,B))
+    linear = -1-real(dot(chi,B))-2penalty*real(dot(B,Y-sigma))
+    scalar,_ = E.minimizeQuadraticOnUnitInterval(quadratic,linear,0.0)
+    least_squares = clamp(real(dot(B,Y-sigma))/real(dot(B,B)),0.0,1.0)
+    @test scalar ≈ least_squares atol=1e-14
+    _,_,refitted,_ = E.irWarmStart(pure,sub,weights,2,H,0.25,
+        Dict(:RE=>real(chi),:IM=>imag(chi)),Param(ir_refit_scalar=true))
+    @test refitted ≈ scalar atol=1e-14
+end
+
+@testset "CP persistence and lazy pools keep aligned active columns" begin
+    dims = [2,2]; D = prod(dims)
+    zero = ComplexF64[1,0]; one = ComplexF64[0,1]
+    complex_factor = (zero+im*one)/sqrt(2)
+    product = [complex_factor,zero]; real_product = [one,one]
+    P = foldl(kron,[v*v' for v in product])
+    Q = foldl(kron,[v*v' for v in real_product])
+    detector = E.ThresholdEntanglementDetector(zeros(D,D),zeros(D,D),dims,[],[])
+    detector.model = E.Model()
+    detector.M = Dict(:RE=>zeros(E.AffExpr,D,D),:IM=>zeros(E.AffExpr,D,D))
+    detector.b = E.AffExpr()
+    local_state = Dict(:RE=>[real(v*v') for v in product],
+        :IM=>[imag(v*v') for v in product])
+    E.addRank1PrincipleState(detector,local_state,
+        Dict(:RE=>zeros(D,D),:IM=>zeros(D,D)),-1.0,true)
+    @test detector.persistentInds == [1]
+    E.clearStates(detector,false)
+    @test length(detector.purestates) == length(detector.substates) ==
+        length(detector.ispersistent) == 1
+    E.clearStates(detector,true)
+    @test isempty(detector.persistentInds) && isempty(detector.ispersistent)
+    E.addBatchStates(detector,[Q],[real_product])
+    E.clearStates(detector,false)
+    @test isempty(detector.purestates) && isempty(detector.substates) &&
+        isempty(detector.ispersistent) && isempty(detector.persistentInds)
+
+    for realmaster in (false,true)
+        detector = E.ThresholdEntanglementDetector(zeros(D,D),zeros(D,D),dims,[P],[product])
+        detector.model = E.Model()
+        detector.M = Dict(:RE=>zeros(E.AffExpr,D,D),:IM=>zeros(E.AffExpr,D,D))
+        detector.b = E.AffExpr()
+        detector.realmaster = realmaster
+        E.addCons(detector,P)
+        detector.poolpurestates = [P,Q,Q,conj.(P)]
+        detector.poolsubstates = [product,real_product,real_product,[conj.(v) for v in product]]
+        detector.poolstats = fill(1,4)
+        detector.round = 2
+        E.poolAdd(detector,Param())
+        expected = realmaster ? 2 : 3
+        @test length(detector.purestates) == length(detector.substates) ==
+            length(detector.ispersistent) == length(detector.cuts) == expected
+        @test detector.purestates[1] == P && detector.purestates[2] == Q
+        @test realmaster || detector.purestates[3] == conj.(P)
+        @test all(detector.purestates[j] ≈
+            foldl(kron,[v*v' for v in detector.substates[j]]) for j in 1:expected)
+    end
 end

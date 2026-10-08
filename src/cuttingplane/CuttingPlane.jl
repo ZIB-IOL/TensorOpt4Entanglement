@@ -21,10 +21,11 @@ the one-shot crossover used by `-a LD1`.
 IR. It does not trigger an additional relaxation solve.
 """
 cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, param::Param,
-             effortlevel = 0, singlerun = false; lower_bound = 0.0, snapshot_state = nothing) =
+             effortlevel = 0, singlerun = false; lower_bound = 0.0, snapshot_state = nothing,
+             pricing_pool = nothing) =
     withPhase(:cp) do
         cuttingPlane_(detector, separateproblem, param, effortlevel, singlerun;
-            lower_bound=lower_bound, snapshot_state=snapshot_state)
+            lower_bound=lower_bound, snapshot_state=snapshot_state, pricing_pool=pricing_pool)
     end
 
 "A matched master solution, independent of later changes to the column pool."
@@ -52,14 +53,37 @@ function mixedMasterSnapshot(detector)
     return MasterSnapshot(1.0, 0.0, 0.0, pure, sub, fill(1.0 / D, D), zero_witness, 1.0, 0.0)
 end
 
-function masterSnapshot(detector, upper, param)
-    has_values(detector.model) && has_duals(detector.model) && isfinite(upper) || return nothing
-    raw = Float64[abs(dual(cut)) for cut in detector.cuts]
+"Select a sparse matched LP certificate from the solver's available results."
+function masterSnapshot(detector, upper, param; result = nothing)
+    model = detector.model
+    if isnothing(result)
+        # MOSEK can return both its interior-point and basic LP solutions.
+        # Older MosekTools versions expose the dense interior-point solution
+        # first. Selecting an already computed basic solution avoids discarding
+        # essential tiny coefficients or growing the next IR master needlessly.
+        candidates = MasterSnapshot[]
+        for index in 1:result_count(model)
+            snapshot = masterSnapshot(detector, upper, param; result=index)
+            isnothing(snapshot) || push!(candidates,snapshot)
+        end
+        isempty(candidates) && return nothing
+        best_upper = minimum(snapshot.upper for snapshot in candidates)
+        eligible = filter(snapshot -> snapshot.upper <= best_upper + param.master_obj_tol, candidates)
+        return eligible[argmin([(length(snapshot.weights),snapshot.upper) for snapshot in eligible])]
+    end
+    feasible = (MOI.FEASIBLE_POINT,MOI.NEARLY_FEASIBLE_POINT)
+    primal_status(model;result=result) in feasible &&
+        dual_status(model;result=result) in feasible || return nothing
+    upper = dual_objective_value(model;result=result)
+    primal = objective_value(model;result=result)
+    isfinite(upper) && isfinite(primal) && primal <= upper + param.obj_tol || return nothing
+    raw = Float64[abs(dual(cut;result=result)) for cut in detector.cuts]
     total = sum(raw)
     isfinite(total) && total > 0 || return nothing
     pure, sub, weights = [], [], Float64[]
     for (a, index) in enumerate(detector.mastercolumns)
         P, factors, w = detector.purestates[index], detector.substates[index], raw[a] / total
+        iszero(w) && continue
         if detector.realmaster && any(!iszero, imag(P))
             push!(pure, P, conj.(P))
             push!(sub, factors, [conj.(v) for v in factors])
@@ -74,13 +98,46 @@ function masterSnapshot(detector, upper, param)
     Y = sum(weights[a] * pure[a] for a in eachindex(weights))
     residual = norm(Y - ((1 - upper) * H + upper * mixed))
     residual <= 10 * param.feas_tol || return nothing
-    M = Dict(:RE => Matrix(value.(detector.M[:RE])), :IM => Matrix(value.(detector.M[:IM])))
-    b = value(detector.b)
+    M = Dict(:RE => Matrix(value.(detector.M[:RE];result=result)),
+             :IM => Matrix(value.(detector.M[:IM];result=result)))
+    b = value(detector.b;result=result)
+    isfinite(b) && all(isfinite,M[:RE]) && all(isfinite,M[:IM]) || return nothing
     scale = dot(M[:RE], real(H - mixed)) + dot(M[:IM], imag(H))
     isfinite(scale) && scale > 0 && abs(scale - 1) <= 10 * param.feas_tol || return nothing
     M[:RE] ./= scale; M[:IM] ./= scale; b /= scale
     objective = dot(M[:RE], detector.H[:RE]) + dot(M[:IM], detector.H[:IM]) - b
+    isfinite(objective) || return nothing
+    if upper < 0
+        # An interior separable target can have a negative unrestricted LP
+        # value. Interpolate its decomposition back to H rather than return
+        # an unphysical negative white-noise threshold.
+        alpha = 1 / (1 - upper)
+        weights .*= alpha
+        if alpha < 1
+            basis = mixedMasterSnapshot(detector)
+            append!(pure, basis.purestates)
+            append!(sub, basis.substates)
+            append!(weights, (1 - alpha) .* basis.weights)
+        end
+        residual *= alpha
+        upper = 0.0
+    end
     return MasterSnapshot(upper, objective, b, copy(pure), copy(sub), weights, M, total, residual)
+end
+
+"Retain a violated final pricing column for the next IR master."
+function retainPricingColumn!(pool, detector, Xvals, witness, offset)
+    isnothing(pool) && return
+    factors = [begin
+        matrix = Hermitian(Xvals[:RE][k] + im * Xvals[:IM][k])
+        values, vectors = eigen(matrix)
+        x = vectors[:, argmax(values)]
+        x / norm(x)
+    end for k in eachindex(detector.dims)]
+    P = foldl(kron, [x * x' for x in factors])
+    dot(witness[:RE], real(P)) + dot(witness[:IM], imag(P)) > offset || return
+    push!(pool.pure, P)
+    push!(pool.sub, factors)
 end
 
 function snapshotResult(snapshot, lower, terminate)
@@ -128,7 +185,7 @@ end
 
 function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, param::Param,
                        effortlevel = 0, singlerun = false;
-                       lower_bound = 0.0, snapshot_state = nothing)
+                       lower_bound = 0.0, snapshot_state = nothing, pricing_pool = nothing)
     snapshot = isnothing(snapshot_state) || isnothing(snapshot_state[]) ?
         mixedMasterSnapshot(detector) : snapshot_state[]
     lower, terminate = max(0.0, lower_bound), false
@@ -138,6 +195,7 @@ function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, 
     iter = 0
     has_current = false
     stable_snapshot = nothing
+    stabilized_final = false
     try
         while remainingTime(param) > 0
             if isTimeLimitNearlyReached(param)
@@ -162,33 +220,50 @@ function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, 
             singlerun && break
             remainingTime(param) <= 0 && break
 
-            certify = !param.is_last && param.cp_certify_every > 0 && iter % param.cp_certify_every == 0
-            if certify
+            periodic = param.cp_certify_every > 0 && iter % param.cp_certify_every == 0
+            certify = !param.is_last && periodic
+            unstabilized = current
+            if periodic || (param.is_last && param.cp_certify_every > 0 && !stabilized_final)
                 current = stableMasterWitness(detector, current, param)
                 stable_snapshot = current
+                stabilized_final |= param.is_last
             end
             if snapshot.upper == current.upper
                 snapshot = current
                 isnothing(snapshot_state) || (snapshot_state[] = snapshot)
             end
-            separateproblem.H = current.witness
-            separateproblem.Hout = current.witness
-            separateproblem.cutoffbound = current.offset
             level = param.is_last ? 2 : (certify ? 1 : 0)
-            saved_nodes = param.maxnnodes
-            certify && (param.maxnnodes = 1)
             local activeness, oracle_upper, state, Xvals
-            try
-                activeness, oracle_upper, state, Xvals = separate!(separateproblem, param, level, false)
-            finally
-                param.maxnnodes = saved_nodes
+            local addstate, candidate_lower
+            for attempt in 1:2
+                separateproblem.H = current.witness
+                separateproblem.Hout = current.witness
+                separateproblem.cutoffbound = current.offset
+                saved_nodes = param.maxnnodes
+                certify && (param.maxnnodes = 1)
+                try
+                    activeness, oracle_upper, state, Xvals = separate!(separateproblem, param, level, false)
+                finally
+                    param.maxnnodes = saved_nodes
+                end
+                terminate, addstate, candidate_lower = checkTerminationGap(detector,
+                    current.objective, activeness, oracle_upper, current.offset, lower, param;
+                    master_upper=snapshot.upper)
+                lower = max(lower, candidate_lower)
+                # A near-optimal regularised witness can have no violated
+                # product while its objective loss still exceeds the desired
+                # gap. Price the original LP witness before stopping.
+                if attempt == 1 && !terminate && !addstate && current !== unstabilized && remainingTime(param) > 0
+                    current = unstabilized
+                else
+                    break
+                end
             end
-            terminate, addstate, candidate_lower = checkTerminationGap(detector,
-                current.objective, activeness, oracle_upper, current.offset, lower, param)
-            lower = max(lower, candidate_lower)
             traceRow!(trace, iter, param.is_last, snapshot.upper, lower,
                 candidate_lower - current.upper, length(detector.purestates))
             iter += 1
+            addstate && !isnothing(Xvals) &&
+                retainPricingColumn!(pricing_pool, detector, Xvals, current.witness, current.offset)
             if terminate || remainingTime(param) <= 0 ||
                (!param.is_last && param.maxrounds >= 0 && iter >= min(param.maxrounds, 2 * detector.dimH^2 + 1))
                 break

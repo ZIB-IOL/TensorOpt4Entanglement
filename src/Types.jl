@@ -36,7 +36,8 @@ Cutting plane (CP) and active set
   `cp_real_master`  real witness and conjugate-pair columns for real targets
   `cp_rounds_per_ir` optional CP round cap in intermediate IR passes (-1 = off)
   `cp_certify_every` stabilise the witness and certify at the root every N
-                     rounds (0 = off); IR also stabilises its returned witness
+                     intermediate rounds (0 = off); also stabilise witnesses
+                     in the final phase and the witness returned to IR
   `ir_refit_scalar` refit the mixing scalar after trimming the CP support
 
 sBB linear-minimisation oracle

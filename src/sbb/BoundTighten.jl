@@ -1,4 +1,27 @@
+"""
+    tightenOBBTEntryBounds!(node, Zind, part, i, j, lower, upper, feas_tol)
 
+Intersect OBBT bounds without replacing a positive-width interval by its
+midpoint. Reject a small inconsistent intersection as numerical uncertainty;
+return `false` only when the contradiction exceeds the feasibility tolerance.
+"""
+function tightenOBBTEntryBounds!(node::Node, Zind, part, i, j, lower, upper, feas_tol)
+    B = node.ZBs[Zind]
+    if part === :RE
+        lower = max(lower, B[part, :L][i, j], B[part, :L][j, i])
+        upper = min(upper, B[part, :U][i, j], B[part, :U][j, i])
+    else
+        lower = max(lower, B[part, :L][i, j], -B[part, :U][j, i])
+        upper = min(upper, B[part, :U][i, j], -B[part, :L][j, i])
+    end
+    tol = feas_tol * max(1.0, abs(lower), abs(upper))
+    lower > upper && return lower - upper < tol
+    tightenEntryBounds!(node, Zind, part, i, j, lower, upper)
+    # A finite interval contains feasible points away from its midpoint, even
+    # if its width is below the numerical feasibility tolerance.
+    lower == upper && (node.fixvars[(Zind, part, i, j)] = lower)
+    return true
+end
 
 function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobbt)
     BST = stateseparator.problem.BST
@@ -29,15 +52,10 @@ function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobb
                                     upper = focusnode.ZBs[Zind][part,:U][tj,tk]
                                     direction == :L ? (lower = sol.dualobj - stateseparator.param.tol) :
                                         (upper = -sol.dualobj + stateseparator.param.tol)
-                                    tightenEntryBounds!(focusnode,Zind,part,tj,tk,lower,upper)
+                                    isfeasible = tightenOBBTEntryBounds!(focusnode, Zind, part, tj, tk,
+                                        lower, upper, stateseparator.param.feas_tol)
+                                    isfeasible || return
                                 end
-                            end
-                            tol = stateseparator.param.feas_tol * maximum((1,0,abs( focusnode.ZBs[Zind][part, :U][tj, tk]), abs(focusnode.ZBs[Zind][part, :L][tj, tk]) ))
-                            if abs( focusnode.ZBs[Zind][part, :U][tj, tk] - focusnode.ZBs[Zind][part, :L][tj, tk] ) < tol
-                                print("fix\n")
-                                focusnode.fixvars[(Zind, part, tj, tk)] = (focusnode.ZBs[Zind][part, :U][tj, tk] + focusnode.ZBs[Zind][part, :L][tj, tk]) / 2
-                            elseif focusnode.ZBs[Zind][part, :U][tj, tk] - focusnode.ZBs[Zind][part, :L][tj, tk] <= -tol
-                                isfeasible = false
                             end
                         end
                     end

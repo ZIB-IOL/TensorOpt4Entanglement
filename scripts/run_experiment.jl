@@ -49,9 +49,8 @@ function parseCommandline()
             arg_type = Int
             default = 1
         "--maxrounds"
-            help = "Maximum number of separation rounds"
+            help = "CP rounds before gap-closing (-1 unlimited; default: size preset, CP unlimited)"
             arg_type = Int
-            default = 100
         "--heur-ladmm1-maxiter"
             help = "LADMM outer iterations in the first IR pass (default: size preset)"
             arg_type = Int

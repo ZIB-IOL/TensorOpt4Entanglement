@@ -174,8 +174,9 @@ end
 
 Fold convex weights into the mode vectors and flatten them into a lift point:
 scaling every mode vector of term j by `w_j^(1/(2m))` multiplies its rank-one
-tensor by `w_j`, so `liftMap(M, p) == sum_j w_j * p_j`. Terms with negligible
-weight are dropped; returns `(p, nrank1_kept)`.
+tensor by `w_j`, so `liftMap(M, p) == sum_j w_j * p_j`. Terms with zero
+weight are dropped; positive weights retain the selected CP mixture exactly.
+Returns `(p, nrank1_kept)`.
 """
 function packFactors(substates, weights, nrank1, sumdim, dims, cdims, nsubs)
     p = Float64[]
@@ -185,7 +186,7 @@ function packFactors(substates, weights, nrank1, sumdim, dims, cdims, nsubs)
     for i in 1:nrank1
         weight = weights[i]
         isfinite(weight) && weight >= 0 || throw(DomainError(weight,"Weights must be nonnegative and finite"))
-        weight < 1e-9 && continue
+        iszero(weight) && continue
         scale = weight^(1 / (2 * nsubs))
         term_trace = weight
         for j in 1:nsubs

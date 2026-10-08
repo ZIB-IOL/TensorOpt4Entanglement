@@ -20,6 +20,7 @@
 mutable struct LiftProjectionWorkspace
     point::Vector{Float64}
     normal::Vector{Float64}
+    retraction_point::Vector{Float64}
     norms_squared::Matrix{Float64}
     term_products::Vector{Float64}
     normal_squared::Float64
@@ -39,6 +40,7 @@ struct LiftModel <: AbstractLiftModel
         cdims = cumulativeAdd!(cdims)
         sumdim = sum(dims)
         projection = LiftProjectionWorkspace(zeros(2sumdim*nrank1),zeros(2sumdim*nrank1),
+            zeros(2sumdim*nrank1),
             zeros(nrank1,nsubs),zeros(nrank1),0.0,false)
         new(nrank1, dims, cdims, nsubs, sumdim, projection)
     end
@@ -66,13 +68,31 @@ get_reason(stop::LADMMDeadline) = stop.reached ? "LADMM wall-clock budget reache
 
 function ladmmLineSearch(M, p)
     # `max_step_size` is not a quasi_Newton keyword. Configure the line search
-    # explicitly, including a positive bisection tolerance to avoid stagnation
-    # when the two trial steps round to adjacent floating-point numbers.
+    # explicitly, with a positive baseline bisection tolerance.
     return WolfePowellLinesearch(M; p=copy(p), X=zero_vector(M, p),
         max_stepsize=0.1, sufficient_curvature=0.999,
         stop_when_stepsize_less=1e-10,
         retraction_method=ProjectionRetraction(), vector_transport_method=ProjectionTransport())
 end
+
+struct LADMMWolfeGuard{S<:Manopt.Stepsize} <: Manopt.Stepsize
+    search::S
+end
+
+function (guard::LADMMWolfeGuard)(problem, state, iteration,
+        direction=-Manopt.get_gradient(problem, Manopt.get_iterate(state)); kwargs...)
+    M = Manopt.get_manifold(problem)
+    p = Manopt.get_iterate(state)
+    cap = min(1e9, guard.search.max_stepsize / norm(M, p, direction))
+    # Wolfe doubles its bracket at most past cap, so its endpoints are below
+    # 2cap. An ulp-scaled tolerance prevents rounded-midpoint stagnation;
+    # its added uncertainty in displacement is at most 8eps(Float64)*0.1.
+    guard.search.stop_when_stepsize_less = max(1e-10, 8eps(cap))
+    return guard.search(problem, state, iteration, direction; kwargs...)
+end
+
+Manopt.get_last_stepsize(guard::LADMMWolfeGuard, args...) =
+    Manopt.get_last_stepsize(guard.search, args...)
 
 function ladmmPenalty(zeta, residual, dual_residual, grad_norm, policy)
     if policy == :legacy
@@ -84,6 +104,41 @@ function ladmmPenalty(zeta, residual, dual_residual, grad_norm, policy)
     residual > 10 * dual_residual && return min(2 * zeta, 200.0)
     dual_residual > 10 * residual && return max(zeta / 2, 0.1)
     return zeta
+end
+
+"""
+Tighten high-accuracy inner solves as the previous primal residual decreases.
+
+A fixed absolute cost-change tolerance can end the x-step while its gradient
+is still large compared with the remaining constraint violation. Use an
+O(residual^2) cost tolerance and O(residual) step/gradient tolerances, bounded
+by the requested tolerances and positive numerical floors. Ordinary IR calls
+keep their existing stopping tolerances and allocation of work to CP.
+"""
+function ladmmInnerTolerances(obj_tol, step_tol, gd_tol, residual, high_accuracy)
+    high_accuracy || return obj_tol, step_tol, gd_tol
+    return min(obj_tol, max(1e-12, 0.05 * residual^2)),
+           min(step_tol, max(1e-9, 0.1 * residual)),
+           min(gd_tol, max(1e-7, 0.1 * residual))
+end
+
+function ladmmConverged(residual, grad_norm, inner_obj_tol, grad_tol,
+                        objectives, param, high_accuracy)
+    # The original objective is 1-z. Augmented costs from different outer
+    # iterations are not comparable because their multipliers/penalties change.
+    feas_tol = high_accuracy ? param.feas_tol : inner_obj_tol
+    objective_stable = !high_accuracy || (length(objectives) == 4 &&
+        maximum(objectives) - minimum(objectives) <= param.master_obj_tol)
+    return residual < feas_tol && grad_norm < grad_tol && objective_stable
+end
+
+function ladmmKeepEarlierPoint(best_residual, best_objective, residual, objective,
+                               direction_norm, objective_tol)
+    direction_norm > 0 || return false
+    # Refitting z by least squares changes it by at most ||R||/||H-I/d||.
+    # Use this uncertainty to select columns, not to certify an upper bound.
+    return best_residual < 0.8residual &&
+        best_objective <= objective + objective_tol + residual / direction_norm
 end
 
 function vecNormSquare(M::LiftModel, p,
@@ -167,9 +222,21 @@ end
 #    q /= trc^(1/(2*M.nsubs))
 #    return q
 function retract_project!(M::LiftModel, q, p, dp)
-    t = 1.0
-    q .= p + t * dp
+    # Manopt also retracts in place. Preserve the base point only in that case,
+    # using reusable storage so line-search trials need no extra allocation.
+    basepoint = p
+    if Base.mightalias(q, p)
+        basepoint = M.projection.retraction_point
+        copyto!(basepoint, p)
+    end
+    q .= basepoint .+ dp
     trc = fastTrace(M, q)
+    if !(isfinite(trc) && trc > 0)
+        # A tangent trial can annihilate a small local factor. Returning the
+        # base point lets a descent line search reject this trial and shrink.
+        copyto!(q, basepoint)
+        return q
+    end
     q ./= trc^(1/(2*M.nsubs))
     return q
 end
@@ -282,11 +349,19 @@ function appendLADMMColumns!(pool, history, M, work, p, offset, tol)
     # these valid product columns can only enlarge the next inner approximation.
     keep = findall(r -> history.scores[r] > max(final[r], offset) + tol, 1:M.nrank1)
     isempty(keep) && return
-    q = copy(history.point)
-    q ./= fastTrace(M, q)^(1 / (2M.nsubs))
-    P, S, _ = unpackFactors(q, M.nrank1, M.sumdim, M.dims, M.cdims, M.nsubs)
-    append!(pool.pure, P[keep])
-    append!(pool.sub, S[keep])
+    # Extract selected blocks before unpacking: unpackFactors drops exact-zero
+    # terms, so its output indices need not be the original rank indices.
+    blocksize = 2M.sumdim
+    q = Vector{Float64}(undef, length(keep) * blocksize)
+    for (a, r) in enumerate(keep)
+        copyto!(view(q, (a-1)*blocksize+1:a*blocksize),
+            view(history.point, (r-1)*blocksize+1:r*blocksize))
+    end
+    selected = LiftModel(length(keep), M.dims, M.nsubs)
+    q ./= fastTrace(selected, q)^(1 / (2M.nsubs))
+    P, S, _ = unpackFactors(q, length(keep), M.sumdim, M.dims, M.cdims, M.nsubs)
+    append!(pool.pure, P)
+    append!(pool.sub, S)
     return nothing
 end
 
@@ -311,33 +386,47 @@ the penalty doubles or halves only when the primal and dual residuals differ
 by more than a factor of ten. Here the dual residual is
 `2*zeta*norm(H - I/d)*abs(z - z_previous)`.
 Inner solves share the enclosing wall-clock deadline.
+High-accuracy standalone calls tighten their inner cost, step and gradient
+tolerances as the previous primal residual decreases; ordinary IR calls keep
+the requested tolerances. Standalone convergence requires the fixed feasibility
+tolerance, Lagrangian stationarity and a stable original objective over four
+iterates; its feasibility tolerance does not shrink with the inner cost tolerance.
 
 When IR supplies `candidate_pool` and the preceding CP offset, retain earlier
 product states that violate that witness more than the final states. The pool
 adds columns to CP; it does not change the LADMM iterate or its residual.
+High-accuracy calls also retain one earlier lower-residual mixture when its
+objective is competitive within the final residual's scalar uncertainty.
+Its product columns supplement the final columns; CP validates the bound.
+
+An optional `warm_state` reference carries the point, scalar, multiplier matrix,
+penalty, inner stopping tolerances and objective history across a failed CP pass.
+Restoring the point also preserves local factor scales and zero slots. IR clears this state
+when a fresh CP witness is available. Its multipliers use LADMM's sign
+convention; older multiplier/penalty-only states remain accepted.
 
 Returns `(purestates, substates, 1 - z, residual, weights)`. The third value is
-the heuristic upper bound `ub_heur`; it is only a valid bound on the original
-problem when `residual` is zero to tolerance.
+the heuristic objective `ub_heur`; finite residuals alone do not certify a
+bound on the original problem. The CP crossover validates a separable mixture.
 """
 ladmmSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers,
              param::Param, is_escaping = false, is_high_accuracy = false;
-             candidate_pool = nothing, candidate_offset = -Inf) =
+             candidate_pool = nothing, candidate_offset = -Inf, warm_state = nothing) =
     withPhase(:ladmm) do
         ALMADMMSolve_(detector, dims, H, substates, weights, z, multipliers,
                       param, is_escaping, is_high_accuracy;
-                      candidate_pool=candidate_pool, candidate_offset=candidate_offset)
+                      candidate_pool=candidate_pool, candidate_offset=candidate_offset,
+                      warm_state=warm_state)
     end
 
 function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param, is_escaping = false, is_high_accuracy = false;
-    candidate_pool = nothing, candidate_offset = -Inf)
+    candidate_pool = nothing, candidate_offset = -Inf, warm_state = nothing)
     obj_tol = param.heur_LADMM_obj_tol * ( is_high_accuracy ? 0.1 : 1)
     step_tol = param.heur_LADMM_step_tol * ( is_high_accuracy ? 0.1 : 1)
     gd_tol = param.heur_LADMM_gd_tol * ( is_high_accuracy ? 0.1 : 1)
     min_obj_tol = obj_tol * 0.1
     min_step_tol = step_tol * 0.1
     min_gd_tol = gd_tol * 0.1
-    multi_bound = 1e2
     zeta = param.heur_LADMM_rho
     deadline = param.start_time + (param.is_last ? 1.0 : 1 - param.tratio) * param.time_limit
 
@@ -355,7 +444,31 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
 
     @assert(length(weights) == nrank1)
 
-    pX0, nrank1 = packFactors(substates, weights, nrank1, sumdim, dims, cdims, nsubs)
+    previous_state = isnothing(warm_state) ? nothing : warm_state[]
+    if !isnothing(previous_state)
+        size(previous_state.multipliers) == (dimH, dimH) ||
+            throw(DimensionMismatch("The LADMM warm multiplier has the wrong dimension"))
+    end
+    has_point = !isnothing(previous_state) && hasproperty(previous_state, :point)
+    prior_iterations = 0
+    if has_point
+        hasproperty(previous_state, :dims) && previous_state.dims == dims ||
+            throw(DimensionMismatch("The LADMM warm point has different subsystem dimensions"))
+        pX0 = Vector{Float64}(previous_state.point)
+        !isempty(pX0) && length(pX0) % (2sumdim) == 0 ||
+            throw(DimensionMismatch("The LADMM warm point has the wrong length"))
+        nrank1 = length(pX0) ÷ (2sumdim)
+        z = Float64(previous_state.z)
+        if hasproperty(previous_state, :tolerances)
+            obj_tol = min(obj_tol, Float64(previous_state.tolerances[1]))
+            step_tol = min(step_tol, Float64(previous_state.tolerances[2]))
+            gd_tol = min(gd_tol, Float64(previous_state.tolerances[3]))
+        end
+        hasproperty(previous_state, :iterations) &&
+            (prior_iterations = Int(previous_state.iterations))
+    else
+        pX0, nrank1 = packFactors(substates, weights, nrank1, sumdim, dims, cdims, nsubs)
+    end
     debuginfo = param.log_level > 1 ?
         [:Iteration, (:Cost, " F(x): %1.11f | "), (:GradientNorm, " |Df(x)|: %1.11f | "), (:Stepsize, " Stepsize: %1.11f | "), "\n", :Stop] : []
 
@@ -366,28 +479,50 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
     Mdir_c = Mdir[:RE] .+ im .* Mdir[:IM]
     Min_c = Min[:RE] .+ im .* Min[:IM]
     multipliers_c = multipliers[:RE] .+ im .* multipliers[:IM]
+    # Intermediate columns are scored by the preceding CP witness, even when
+    # a failed master makes us continue with LADMM's newer multiplier instead.
+    column_witness = isnothing(candidate_pool) || iszero(norm(multipliers_c)) ?
+        nothing : -copy(multipliers_c)
+    if !isnothing(previous_state)
+        multipliers_c = Matrix{ComplexF64}(previous_state.multipliers)
+        zeta = Float64(previous_state.penalty)
+    end
 
     maxiter,maxmanoptiter = ladmmIterationLimits(param,is_escaping,is_high_accuracy,dimH)
-    cur_pen = norm(liftMap(M, pX) - (Mdir_c * z + Min_c))
+    y = liftMap(M, pX)
+    cur_pen = norm(y - (Mdir_c * z + Min_c))
     direction_norm = norm(Mdir_c)
-    indexmap = buildIndexMap(dims)
+    # The analytic contraction gradient no longer needs the entrywise map.
+    indexmap = nothing
     workspace = LiftGradientWorkspace(M)
-    history = isnothing(candidate_pool) || iszero(norm(multipliers_c)) ? nothing :
-        LADMMColumnHistory(copy(pX), fill(-Inf, nrank1), -copy(multipliers_c))
+    history = isnothing(column_witness) ? nothing :
+        LADMMColumnHistory(copy(pX), fill(-Inf, nrank1), column_witness)
+    best_point = is_high_accuracy && !isnothing(candidate_pool) && direction_norm > 0 ?
+        copy(pX) : nothing
+    # Select among completed updates: an initial I/d at z=0 has zero residual
+    # without any progress in the original threshold objective.
+    best_residual, best_objective = Inf, 1-z
+    objectives = is_high_accuracy ? Float64[1-z] : Float64[]
+    if is_high_accuracy && has_point && hasproperty(previous_state, :objectives) &&
+            !isempty(previous_state.objectives)
+        objectives = copy(previous_state.objectives)
+    end
     trace = ladmmTraceSink()
 
     i = 1
     while true  # adjust number of iterations as needed
         time() >= deadline && break
 
+        inner_obj_tol, inner_step_tol, inner_gd_tol = ladmmInnerTolerances(
+            obj_tol, step_tol, gd_tol, cur_pen, is_high_accuracy)
         # update manifold
         myf, mygrad_f, func, grad_l_closure = makeObjectiveClosures(M, Mdir_c, Min_c,
             multipliers_c, zeta, z, indexmap; workspace=workspace, cached=true)
         #y = liftMap(M, pX)
         #y /= tr(y)
         state = quasi_Newton(M, myf, mygrad_f, pX; debug=debuginfo, return_state=true, record=[:Iteration],
-            memory_size=20, stepsize=ladmmLineSearch(M, pX),
-            stopping_criterion=StopAfterIteration(maxmanoptiter) | StopWhenChangeLess(M, step_tol) | StopWhenCostChangeLess(obj_tol) | StopWhenGradientNormLess(gd_tol) | LADMMDeadline(deadline),
+            memory_size=20, stepsize=LADMMWolfeGuard(ladmmLineSearch(M, pX)(M)),
+            stopping_criterion=StopAfterIteration(maxmanoptiter) | StopWhenChangeLess(M, inner_step_tol) | StopWhenCostChangeLess(inner_obj_tol) | StopWhenGradientNormLess(inner_gd_tol) | LADMMDeadline(deadline),
             project! = fastProjTangent!, retraction_method = ProjectionRetraction(),
             vector_transport_method = ProjectionTransport())
         pX = get_solver_return(state)
@@ -395,7 +530,7 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
         iterations = get_record(state, :Iteration)
         last_iteration = isempty(iterations) ? 0 : last(iterations)
         # refine tolerance
-        if (i == 1 || is_high_accuracy)  && last_iteration <= 3
+        if (prior_iterations + i == 1 || is_high_accuracy)  && last_iteration <= 3
             obj_tol = max( obj_tol / 2, min_obj_tol)
             step_tol = max( step_tol / 2, min_step_tol)
             gd_tol = max( gd_tol / 2, min_gd_tol)
@@ -425,25 +560,32 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
 
         # update multipliers
         multipliers_c .+= (2 * zeta) .* violate
-        # Clamp real and imaginary parts separately
-        multipliers_c .= complex.(
-            clamp.(real(multipliers_c), -multi_bound, multi_bound),
-            clamp.(imag(multipliers_c), -multi_bound, multi_bound)
-        )
+        # Do not clip multiplier entries: normalised CP witnesses can require
+        # arbitrarily large entries near I/d. Clipping also destroys the scalar
+        # KKT condition supplied by the exact z-step and multiplier update.
         cur_pen = sqrt(pen)
         norm_vgl = norm(grad_l_closure(M, pX))
-        # residual is ||A(z) + a - Psi(x)||_2: ub_heur is a valid bound only
-        # once this vanishes, so its trajectory is what the paper discusses
+        if !isnothing(best_point) && cur_pen < best_residual
+            copyto!(best_point, pX)
+            best_residual, best_objective = cur_pen, 1-z
+        end
+        if is_high_accuracy
+            push!(objectives, 1-z)
+            length(objectives) > 4 && popfirst!(objectives)
+        end
+        # f=-z differs from the original threshold objective 1-z by a constant.
+        # Track it alongside feasibility and Lagrangian stationarity.
         traceRow!(trace, i, zeta, f, pen, cur_pen, norm_vgl, z, f + L + zeta * pen)
 
         dual_residual = 2 * zeta * direction_norm * abs(z - previous_z)
+        # chi is unscaled, so adapting zeta does not rescale the multiplier.
         zeta = ladmmPenalty(zeta, cur_pen, dual_residual, norm_vgl, param.heur_LADMM_penalty_update)
 
         # check convergence
-        feas_tol = obj_tol
+        feas_tol = is_high_accuracy ? param.feas_tol : obj_tol
         needbreak = false
         param.log_level > 1 && println("cur_pen: ", cur_pen, " < ", feas_tol, ", norm_vgl: ", norm_vgl, "<", min_gd_tol)
-        if cur_pen < feas_tol && norm_vgl < min_gd_tol
+        if ladmmConverged(cur_pen, norm_vgl, obj_tol, min_gd_tol, objectives, param, is_high_accuracy)
             needbreak = true
         end
 
@@ -471,9 +613,23 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
 
     traceClose!(trace)
     trc = fastTrace(M, pX)
-    pX /= trc^(1/(2*M.nsubs))
+    pX ./= trc^(1/(2*M.nsubs))
+    # Report the residual of the returned normalised decomposition, including
+    # the exhausted-budget path where no inner retraction has been performed.
+    cur_pen = norm(y / trc - (Mdir_c * z + Min_c))
+    isnothing(warm_state) || (warm_state[] = (multipliers=copy(multipliers_c),
+        penalty=zeta, point=copy(pX), z=z, dims=copy(dims),
+        tolerances=(obj_tol, step_tol, gd_tol), iterations=prior_iterations+i-1,
+        objectives=copy(objectives)))
     isnothing(history) || appendLADMMColumns!(candidate_pool, history, M, workspace, pX,
         candidate_offset, param.master_obj_tol)
     purestates_, substates_, weights_ = unpackFactors(pX, nrank1, sumdim, dims, cdims, nsubs)
+    if !isnothing(best_point) && ladmmKeepEarlierPoint(best_residual, best_objective,
+            cur_pen, 1-z, direction_norm, param.master_obj_tol)
+        best_point ./= fastTrace(M, best_point)^(1/(2M.nsubs))
+        earlier_pure, earlier_sub, _ = unpackFactors(best_point, nrank1, sumdim, dims, cdims, nsubs)
+        append!(candidate_pool.pure, earlier_pure)
+        append!(candidate_pool.sub, earlier_sub)
+    end
     return purestates_, substates_, 1 - z, cur_pen, weights_
 end

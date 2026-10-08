@@ -44,11 +44,39 @@ const E = ExactEntanglement
             @test q.cp_rounds_per_ir == -1 && q.cp_certify_every == 0
             @test q.heur_LADMM_penalty_update == :legacy
         end
-        for (n, algo) in ((3, "IR"), (5, "CP"), (5, "LADMM"))
+        for (n, algo) in ((3, "IR"), (5, "CP"), (3, "LADMM"))
             q = Param(); E.applySizePreset!(q, n, algo)
             @test q.heur_LADMM_penalty_update == :legacy
             @test q.cp_rounds_per_ir == -1 && q.cp_certify_every == 0
             @test !q.cp_real_master
+        end
+        for (n, algo) in ((4, "LADMM"), (5, "LADMM"), (4, "LD1"), (5, "LDR3"))
+            q = Param(); E.applySizePreset!(q, n, algo)
+            @test q.cp_real_master
+            @test q.heur_LADMM_penalty_update == :legacy
+            @test q.cp_rounds_per_ir == -1 && q.cp_certify_every == 0
+            E.applyHeuristicOverrides!(q, Dict("cp-real-master"=>false))
+            @test !q.cp_real_master
+        end
+
+        for n in (3, 4, 5), algo in ("CP", "CP-DDPS", "IR")
+            q = Param(); E.applySizePreset!(q, n, algo)
+            default_rounds = algo == "IR" ? q.rank_bound : -1
+            @test q.maxrounds == default_rounds
+            E.applyHeuristicOverrides!(q, Dict("maxrounds" => nothing))
+            @test q.maxrounds == default_rounds
+            E.applyHeuristicOverrides!(q, Dict("maxrounds" => 7))
+            @test q.maxrounds == 7
+            E.applyHeuristicOverrides!(q, Dict("maxrounds" => -1))
+            @test q.maxrounds == -1
+        end
+        @test_throws ArgumentError E.applyHeuristicOverrides!(Param(), Dict("maxrounds" => 0))
+        @test_throws ArgumentError E.applyHeuristicOverrides!(Param(), Dict("maxrounds" => -2))
+        for algo in ("CP", "CP-DDPS")
+            q = Param(); E.applySizePreset!(q, 2, algo)
+            @test q.maxrounds == -1
+            E.applyHeuristicOverrides!(q, Dict("maxrounds" => 7))
+            @test q.maxrounds == 7
         end
 
         # Explicit limits take precedence over the per-size presets.
@@ -88,6 +116,30 @@ const E = ExactEntanglement
     end
 end
 
+@testset "Rank-one state persistence follows its flag" begin
+    dims = [2, 2]
+    H = zeros(4, 4); H[1, 1] = 1
+    X = Dict(:RE => [Matrix{Float64}(E.LinearAlgebra.I, 2, 2) / 2 for _ in dims],
+             :IM => [zeros(2, 2) for _ in dims])
+    for record in (false, true), filtered in (false, true)
+        detector = E.ThresholdEntanglementDetector(H, zeros(4, 4), dims, [], [])
+        # The filtered path also inserts master constraints; no solve is needed.
+        model = Model()
+        detector.model = model
+        detector.M[:RE] = @variable(model, [1:4, 1:4])
+        detector.M[:IM] = @variable(model, [1:4, 1:4])
+        detector.b = @variable(model)
+        M = filtered ? Dict(:RE => zeros(4, 4), :IM => zeros(4, 4)) : nothing
+        b = filtered ? -1.0 : nothing
+        @test E.addRank1State(detector, X, M, b, record) == 4
+        @test detector.ispersistent == fill(record, 4)
+        @test detector.persistentInds == (record ? collect(1:4) : Int[])
+        E.clearStates(detector)
+        @test length(detector.purestates) == (record ? 4 : 0)
+        @test length(detector.substates) == length(detector.ispersistent) == length(detector.persistentInds)
+    end
+end
+
 @testset "conic status classification" begin
     cls(status, ps, ds; sense = JuMP.MIN_SENSE, po = 1.0, du = 1.0, tol = 1e-6,
         tag = E.RelaxInfeasible, unk = false) =
@@ -100,9 +152,21 @@ end
     @test cls(SLOW_PROGRESS, MOI.FEASIBLE_POINT, MOI.INFEASIBILITY_CERTIFICATE;
               tag = E.RelaxInfeasibleCertificate) == E.RelaxInfeasibleCertificate
     @test cls(SLOW_PROGRESS, MOI.NO_SOLUTION, MOI.FEASIBLE_POINT) == E.RelaxNoSolution
-    # an unknown status only means "no solution" when the caller asks for it
-    @test cls(SLOW_PROGRESS, MOI.UNKNOWN_RESULT_STATUS, MOI.FEASIBLE_POINT) != E.RelaxNoSolution
+    # Finite objectives at an unknown point are not a primal/dual certificate.
+    @test cls(SLOW_PROGRESS, MOI.UNKNOWN_RESULT_STATUS, MOI.FEASIBLE_POINT) == E.RelaxNoSolution
     @test cls(SLOW_PROGRESS, MOI.UNKNOWN_RESULT_STATUS, MOI.FEASIBLE_POINT; unk = true) == E.RelaxNoSolution
+    for terminal in (OPTIMAL, SLOW_PROGRESS, ITERATION_LIMIT, TIME_LIMIT),
+        result in (MOI.INFEASIBLE_POINT, MOI.UNKNOWN_RESULT_STATUS, MOI.NO_SOLUTION),
+        sense in (JuMP.MIN_SENSE, JuMP.MAX_SENSE)
+        @test cls(terminal, result, MOI.FEASIBLE_POINT; sense=sense) == E.RelaxNoSolution
+        @test cls(terminal, MOI.FEASIBLE_POINT, result; sense=sense) == E.RelaxNoSolution
+    end
+    for terminal in (OPTIMAL, SLOW_PROGRESS, ITERATION_LIMIT, TIME_LIMIT)
+        expected = terminal == OPTIMAL ? E.RelaxOptimal : E.RelaxFeasible
+        @test cls(terminal, MOI.NEARLY_FEASIBLE_POINT, MOI.FEASIBLE_POINT) == expected
+        @test cls(terminal, MOI.FEASIBLE_POINT, MOI.NEARLY_FEASIBLE_POINT) == expected
+        @test cls(terminal, MOI.NEARLY_FEASIBLE_POINT, MOI.NEARLY_FEASIBLE_POINT) == expected
+    end
     # A wrong-sign gap is a numerical error; it must not trigger infeasibility pruning.
     @test cls(ITERATION_LIMIT, MOI.FEASIBLE_POINT, MOI.FEASIBLE_POINT; po = 1.0, du = 2.0) == E.RelaxError
     @test cls(ITERATION_LIMIT, MOI.FEASIBLE_POINT, MOI.FEASIBLE_POINT; po = 1.0, du = 1.0) == E.RelaxFeasible

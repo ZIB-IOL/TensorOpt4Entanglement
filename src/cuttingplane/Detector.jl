@@ -48,12 +48,19 @@ function addCons(detector::AbstractEntanglementDetector, state, index = length(d
 end
 
 function poolAdd(detector::AbstractEntanglementDetector, param::Param)
+    # LADMM columns can already be active when their pool round becomes
+    # eligible. Add only genuinely missing master columns, including when
+    # several pool entries describe the same column.
+    active = Set((detector.realmaster ? real(state) : state) for state in detector.purestates)
     for (ind, state) in enumerate(detector.poolpurestates)
         if detector.poolstats[ind] > 0 && detector.poolstats[ind] < detector.round
+            key = detector.realmaster ? real(state) : state
+            key in active && continue
             push!(detector.substates, detector.poolsubstates[ind])
             push!(detector.purestates, detector.poolpurestates[ind])
             push!(detector.ispersistent, false)
             addCons(detector, detector.poolpurestates[ind])
+            push!(active,key)
         end
     end
 end
@@ -90,6 +97,7 @@ function addRank1PrincipleState(detector::AbstractEntanglementDetector, Xvals, M
         push!(detector.substates, substates)
         push!(detector.purestates, state)
         push!(detector.ispersistent, recordindx)
+        recordindx && push!(detector.persistentInds, length(detector.purestates))
         if addtoPool
             push!(detector.poolpurestates, state)
             push!(detector.poolsubstates, substates)
@@ -135,7 +143,7 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
             push!(detector.substates, substates)
             push!(detector.purestates, state)
             push!(detector.ispersistent, recordindx)
-            push!(detector.persistentInds, length(detector.purestates))
+            recordindx && push!(detector.persistentInds, length(detector.purestates))
             if addtoPool
                 push!(detector.poolpurestates, state)
                 push!(detector.poolsubstates, substates)
@@ -146,7 +154,7 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
             push!(detector.substates, substates)
             push!(detector.purestates, state)
             push!(detector.ispersistent, recordindx)
-            push!(detector.persistentInds, length(detector.purestates))
+            recordindx && push!(detector.persistentInds, length(detector.purestates))
             if addtoPool
                 push!(detector.poolpurestates, state)
                 push!(detector.poolsubstates, substates)
@@ -161,17 +169,14 @@ function addRank1State(detector::AbstractEntanglementDetector, Xvals, Mout, valu
     return ct
 end
 
-function checkTerminationGap(detector::AbstractEntanglementDetector, primalobj, cutactiveness, cutdualactiveness, valueb, dualobj, param)
+function checkTerminationGap(detector::AbstractEntanglementDetector, primalobj, cutactiveness, cutdualactiveness, valueb, dualobj, param;
+                             master_upper = primalobj)
     addstate = cutactiveness > valueb
     terminate = false
     newdualobj = primalobj + min(0.0, valueb - cutdualactiveness)
-    if cutdualactiveness <= valueb + param.master_obj_tol
-        print("the state is entangled, because the primal obj is positive and optimal (no violated constraint)\n")
+    if master_upper - max(dualobj,newdualobj) <= param.master_obj_tol
+        print("the certified cutting-plane gap is closed\n")
         terminate = true
-    else
-        if newdualobj > param.master_obj_tol
-            #terminate = true
-        end
     end
     return terminate, addstate, newdualobj
 end

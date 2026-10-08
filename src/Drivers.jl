@@ -80,13 +80,18 @@ const RANK_SWEEP = Dict("LADMM_$r" => r for r in (400, 500, 600, 700, 800, 900))
 """
     applySizePreset!(param, nsubs, algo)
 
-Apply the preset for `nsubs` subsystems in place. `maxrounds` tracks the
-factorisation size. Four- and five-subsystem IR uses short intermediate CP
-passes and more frequent, cheaper LADMM calls; the final CP phase keeps its
-full gap-closing budget. Explicit CLI controls override these settings.
+Apply the preset for `nsubs` subsystems in place. IR's `maxrounds` tracks the
+factorisation size; standalone CP defaults to unlimited rounds. Four- and
+five-subsystem IR uses short intermediate CP passes and more frequent, cheaper
+LADMM calls; the final CP phase keeps its full gap-closing budget. Standalone
+LADMM also uses the real master for real four- and five-subsystem targets.
+Explicit CLI controls override these settings.
 """
 function applySizePreset!(param::Param, nsubs::Int, algo::String)
     algo = resolveAlgorithm(algo)   # so a legacy code still selects its r
+    # Standalone CP has no intermediate refinement pass to return to. Keep
+    # its historical unlimited default, while allowing explicit overrides.
+    algo in ("CP", "CP-DDPS") && (param.maxrounds = -1)
     preset = get(SIZE_PRESETS, nsubs, nothing)
     isnothing(preset) && return param
 
@@ -106,17 +111,22 @@ function applySizePreset!(param::Param, nsubs::Int, algo::String)
     if nsubs != 6
         r = nsubs == 5 ? get(RANK_SWEEP, algo, param.rank_bound) : param.rank_bound
         param.rank_bound = r
-        param.maxrounds = r
+        algo in ("CP", "CP-DDPS") || (param.maxrounds = r)
     end
     if nsubs in (4, 5) && algo in ("IR", "IR-nolazy", "IR-clear", "IR-DDPS")
         for (field, value) in pairs(IR_PRESETS)
             setfield!(param, field, value)
         end
     end
+    if nsubs in (4, 5) && (algo == "LADMM" || haskey(RANK_SWEEP, algo))
+        # For real targets, use the conjugate-pair master for the standalone
+        # crossover too. Complex targets still use the full complex master.
+        param.cp_real_master = true
+    end
     return param
 end
 
-"""Apply explicit heuristic and sBB limits after the size preset."""
+"""Apply explicit heuristic, sBB and CP limits after the size preset."""
 function applyHeuristicOverrides!(param::Param, args)
     for (key, fields) in (
         ("heur-manopt-maxiter", (:heur_MANOPT_maxiter, :heur_MANOPT1_maxiter)),
@@ -138,6 +148,11 @@ function applyHeuristicOverrides!(param::Param, args)
         isnothing(value) && continue
         value >= 0 || throw(ArgumentError("--$key must be nonnegative"))
         setfield!(param, field, value)
+    end
+    rounds = get(args, "maxrounds", nothing)
+    if !isnothing(rounds)
+        (rounds == -1 || rounds > 0) || throw(ArgumentError("--maxrounds must be -1 or positive"))
+        param.maxrounds = rounds
     end
     for (key, field) in (("heur-ladmm-penalty-update", :heur_LADMM_penalty_update),
                          ("cp-real-master", :cp_real_master),
@@ -203,7 +218,6 @@ const ALGORITHMS = Dict{String,Function}(
         solveIR(HR, HI, dims, p)
     end,
     "CP"      => function (HR, HI, dims, p)
-        p.maxrounds = -1
         ub, lb, aub, afeas = solveCP(HR, HI, dims, p)
         return ub, lb, aub, afeas, 0
     end,
@@ -298,7 +312,7 @@ function runEntangle(args)
         time_limit = args["time-limit"],
         log_level = args["log-level"],
         minnnodes = args["minnnodes"],
-        maxrounds = args["maxrounds"],
+        maxrounds = something(get(args, "maxrounds", nothing), 100),
         heur_LADMM_conjugates = get(args, "heur-ladmm-conjugates", false),
         loop = args["loop"],
     )
@@ -388,6 +402,7 @@ function runEntangle(args)
         println(io, "ladmm1_maxiter: $(param.heur_LADMM1_maxiter)")
         println(io, "sbb_maxnnodes: $(param.maxnnodes)")
         println(io, "sbb_maxeffortnnodes: $(param.maxeffortnnodes)")
+        println(io, "cp_maxrounds: $(param.maxrounds)")
         println(io, "sbb_heur_maxiter: $(param.heur_sbb_maxiter)")
         println(io, "sbb_heur_restarts: $(param.heur_sbb_restarts)")
         println(io, "sbb_heur_node_restarts: $(param.heur_sbb_node_restarts)")

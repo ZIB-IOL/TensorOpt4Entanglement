@@ -17,6 +17,13 @@ const E = ExactEntanglement
         # interior minimum
         z, f = E.minimizeQuadraticOnUnitInterval(1.0, -1.0, 0.0)
         @test z ≈ 0.5 && f ≈ -0.25
+        # Scaling the quadratic cannot change its minimizer. Near the mixed
+        # state LADMM's positive quadratic coefficient can be arbitrarily small.
+        for scale in (1e-14, 1e-100)
+            z, f = E.minimizeQuadraticOnUnitInterval(scale, -scale, 0.0)
+            @test z == 0.5
+            @test f ≈ -scale / 4 rtol=1e-14
+        end
         # linear, decreasing -> right endpoint
         @test E.minimizeQuadraticOnUnitInterval(0.0, -2.0, 1.0)[1] == 1.0
         # linear, increasing -> left endpoint

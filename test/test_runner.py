@@ -94,7 +94,7 @@ elif any('PDGR.solve' in arg for arg in sys.argv):
                    "--heur-ladmm-conjugates", "true",
                    "--cp-real-master", "true", "--cp-rounds-per-ir", "3",
                    "--cp-certify-every", "4", "--ir-refit-scalar", "true",
-                   "--maxnnodes", "7", "--maxeffortnnodes", "15",
+                   "--maxnnodes", "7", "--maxeffortnnodes", "15", "--maxrounds", "7",
                    "--heur-sbb-restarts", "4", "--heur-sbb-maxiter", "200",
                    "--heur-sbb-node-restarts", "10"]
         self.run_script("runjobs.sh", "--local", "main", "--algo", "IR",
