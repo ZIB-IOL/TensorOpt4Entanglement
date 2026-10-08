@@ -29,7 +29,7 @@ Subtypes must provide the fields `nrank1`, `dims`, `cdims`, `nsubs`, `sumdim`.
 abstract type AbstractLiftModel <: AbstractManifold{ℝ} end
 
 manifold_dimension(M::AbstractLiftModel)  = M.sumdim * M.nrank1 * 2
-representation_size(M::AbstractLiftModel) = (manifold_dimension(M),)
+representation_size(M::AbstractLiftModel) = (M.sumdim * M.nrank1 * 2,)
 
 zero_vector(M::AbstractLiftModel, p)      = zeros(Float64, representation_size(M))
 zero_vector!(M::AbstractLiftModel, X, p)  = fill!(X, 0.0)
@@ -50,87 +50,120 @@ The lifting map Psi: sum the outer products of the first `maxrank1` rank-one
 tensor factors packed in `p`.
 """
 function liftMap(M::AbstractLiftModel, p, maxrank1 = M.nrank1)
-    nrank1 = M.nrank1
-    sumdim = M.sumdim
-    dims = M.dims
-    cdims = M.cdims
-    nsubs = M.nsubs
-    y = 0
-    rank = min(nrank1, maxrank1)
-    for i in 1:rank
-        xblock = p[(i - 1) * sumdim * 2 + 1 : i * sumdim * 2]
-        prod = 1
-        for j in 1:nsubs
-            dim = dims[j]
-            x = xblock[ (cdims[j] - dim) * 2 + 1 : cdims[j] * 2]
-            x = x[1:dim] + im * x[dim + 1: 2*dim]
-            prod = kron(prod, x)
+    rank = min(M.nrank1, maxrank1)
+    rank <= 0 && return 0
+    # Batch the rank-one outer products as V * V'. Keep this path free of
+    # mutation so the public lifting map remains differentiable by Zygote.
+    vectors = map(1:rank) do r
+        block = (r - 1) * 2 * M.sumdim
+        factors = map(1:M.nsubs) do k
+            d = M.dims[k]
+            offset = block + 2 * (M.cdims[k] - d)
+            complex.(view(p, offset + 1:offset + d),
+                     view(p, offset + d + 1:offset + 2d))
         end
-        if i == 1
-            y =  prod * prod'
-        else
-            y +=  prod * prod'
+        reduce(kron, factors)
+    end
+    V = reduce(hcat, vectors)
+    return V * V'
+end
+
+struct LiftGradientWorkspace
+    factors::Matrix{ComplexF64}
+    weighted_factors::Matrix{ComplexF64}
+    coefficient::Matrix{ComplexF64}
+    prefixes::Matrix{ComplexF64}
+    suffixes::Matrix{ComplexF64}
+end
+
+function LiftGradientWorkspace(M::AbstractLiftModel)
+    D = prod(M.dims)
+    return LiftGradientWorkspace(
+        zeros(ComplexF64, D, M.nrank1), zeros(ComplexF64, D, M.nrank1),
+        zeros(ComplexF64, D, D), zeros(ComplexF64, D, M.nsubs + 1),
+        zeros(ComplexF64, D, M.nsubs + 1))
+end
+
+function liftPrefixes!(M, work, p, r)
+    prefix = work.prefixes
+    prefix[1, 1] = 1
+    leftdim = 1
+    block = (r - 1) * 2 * M.sumdim
+    @inbounds for k in 1:M.nsubs
+        d = M.dims[k]
+        offset = block + 2 * (M.cdims[k] - d)
+        for a in 1:d, left in 1:leftdim
+            prefix[(left - 1) * d + a, k + 1] =
+                prefix[left, k] * complex(p[offset + a], p[offset + d + a])
+        end
+        leftdim *= d
+    end
+    return prefix
+end
+
+function liftFactors!(M, work, p)
+    D = size(work.factors, 1)
+    @inbounds for r in 1:M.nrank1
+        liftPrefixes!(M, work, p, r)
+        for i in 1:D
+            work.factors[i, r] = work.prefixes[i, M.nsubs + 1]
         end
     end
-    return y
+    return work.factors
 end
 
 """
-    liftGradient!(M, vg, p, coefs, indexmap)
+    liftGradient!(M, vg, p, coefs, indexmap, workspace = LiftGradientWorkspace(M))
 
-Euclidean gradient of `p -> real<coefs, liftMap(M, p)>`, accumulated into `vg`.
-
-Computed analytically instead of by AD: for each tensor entry `(i, j)` the
-product over modes is differentiated with the standard forward/backward prefix
-trick, which is O(m) per entry rather than O(m^2).
+Euclidean gradient of `p -> real<coefs, liftMap(M, p)>`, written into `vg`.
+For each product vector `v`, multiply by `(coefs + coefs')`, then contract
+with the conjugate of the other mode vectors. A single matrix multiplication
+handles all terms: O(r * (D^2 + m * D)), instead of O(r * m * D^2).
+Prefix/suffix products handle zero factor entries. `indexmap` is retained for
+compatibility with callers of the previous entrywise implementation.
 """
-function liftGradient!(M, vg, p, coefs, indexmap)
-    nrank1 = M.nrank1
-    sumdim = M.sumdim
-    dims = M.dims
-    D = prod(dims)
-    nsubs = M.nsubs
+function liftGradient!(M, vg, p, coefs, indexmap,
+                       work::LiftGradientWorkspace = LiftGradientWorkspace(M);
+                       factors_ready = false)
+    D = prod(M.dims)
+    factors_ready || liftFactors!(M, work, p)
+    # real<coefs, vv'> depends only on the Hermitian part of coefs.
+    @inbounds for j in 1:D, i in 1:D
+        work.coefficient[i, j] = coefs[i, j] + conj(coefs[j, i])
+    end
+    mul!(work.weighted_factors, work.coefficient, work.factors)
 
-    fill!(vg, 0.0)  # Initialize gradient vector to zero
-
-    indexlen = nsubs * 2
-    forward_prods = Vector{Complex{Float64}}(undef, indexlen)
-    backward_prods = Vector{Complex{Float64}}(undef, indexlen)
-    for r in 1:nrank1
-        for i in 1:D
-            for j in 1:D
-                # get tensor index mapped back to products
-                indices = indexmap[i, j]
-                coef = coefs[i, j]
-                real_coef = real(coef)
-                imag_coef = imag(coef)
-                # get the block index in flattened tensor
-                idx_block_start = (r - 1) * sumdim * 2 + 1
-                idx_block_end =  r * sumdim * 2
-
-                # get the correponding block in flattened tensor
-                x = p[idx_block_start:idx_block_end]
-                forward_prods[1] = 1.0 + 0.0im
-                for k in 2:indexlen
-                    real_idx, imag_idx, sign = indices[k-1]
-                    forward_prods[k] = forward_prods[k-1] * (x[real_idx] + im * sign * x[imag_idx])
-                end
-
-                # backward product
-                backward_prods[end] = 1.0 + 0.0im
-                for k in (indexlen-1):-1:1
-                    real_idx, imag_idx, sign = indices[k + 1]
-                    backward_prods[k] = backward_prods[k+1] * (x[real_idx] + im * sign * x[imag_idx])
-                end
-
-                for (k, (real_idx, imag_idx, sign)) in enumerate(indices)
-                    partial_prod = forward_prods[k] * backward_prods[k]
-                    gxr = real_coef * real(partial_prod) +  imag_coef * imag(partial_prod)
-                    gxi = sign * (- real_coef * imag(partial_prod) + imag_coef * real(partial_prod))
-                    vg[idx_block_start + real_idx - 1] += gxr
-                    vg[idx_block_start + imag_idx - 1] += gxi
-                end
+    fill!(vg, 0.0)
+    @inbounds for r in 1:M.nrank1
+        liftPrefixes!(M, work, p, r)
+        block = (r - 1) * 2 * M.sumdim
+        rightdim = 1
+        work.suffixes[1, M.nsubs + 1] = 1
+        for k in M.nsubs:-1:1
+            d = M.dims[k]
+            offset = block + 2 * (M.cdims[k] - d)
+            for right in 1:rightdim, a in 1:d
+                work.suffixes[(a - 1) * rightdim + right, k] =
+                    complex(p[offset + a], p[offset + d + a]) * work.suffixes[right, k + 1]
             end
+            rightdim *= d
+        end
+        leftdim = 1
+        for k in 1:M.nsubs
+            d = M.dims[k]
+            rightdim = D ÷ (leftdim * d)
+            offset = block + 2 * (M.cdims[k] - d)
+            for a in 1:d
+                g = zero(ComplexF64)
+                for right in 1:rightdim, left in 1:leftdim
+                    i = ((left - 1) * d + a - 1) * rightdim + right
+                    g += conj(work.prefixes[left, k] * work.suffixes[right, k + 1]) *
+                         work.weighted_factors[i, r]
+                end
+                vg[offset + a] = real(g)
+                vg[offset + d + a] = imag(g)
+            end
+            leftdim *= d
         end
     end
     return vg
@@ -145,57 +178,30 @@ tensor by `w_j`, so `liftMap(M, p) == sum_j w_j * p_j`. Terms with negligible
 weight are dropped; returns `(p, nrank1_kept)`.
 """
 function packFactors(substates, weights, nrank1, sumdim, dims, cdims, nsubs)
-    p = []
-    y = 0
-    sumtrprod_ = 0
-    k = 0
-    nrank1_ = 0
+    p = Float64[]
+    sizehint!(p, 2 * sumdim * nrank1)
+    total_trace = 0.0
+    kept = 0
     for i in 1:nrank1
-        substate = substates[i]
         weight = weights[i]
-        prod = 1
-        if weight < 1e-9
-            continue
-        else
-            scale = weight^(1/ (2 * nsubs))
-        end
-
-        lenp = length(p)
+        isfinite(weight) && weight >= 0 || throw(DomainError(weight,"Weights must be nonnegative and finite"))
+        weight < 1e-9 && continue
+        scale = weight^(1 / (2 * nsubs))
+        term_trace = weight
         for j in 1:nsubs
-            append!(p, real(substate[j]) * scale)
-            append!(p, imag(substate[j]) * scale)
-            @assert( length(substate[j]) == dims[j])
-            prod = kron(prod, substate[j] * substate[j]')
+            v = substates[i][j]
+            length(v) == dims[j] || throw(DimensionMismatch("Local factor has the wrong dimension"))
+            term_trace *= sum(abs2, v)
+            append!(p, scale .* real.(v))
+            append!(p, scale .* imag.(v))
         end
-
-        if sumdim * 2 != length(p) - lenp
-            print("error dims", (sumdim, dims[1], nsubs, length(p) - lenp, length(substate[1])))
-        end
-        @assert(sumdim * 2 == length(p) - lenp)
-
-        nrank1_ += 1
-        xblock = p[(nrank1_ - 1) * sumdim * 2 + 1 : nrank1_ * sumdim * 2]
-        prod_ = 1
-        for j in 1:nsubs
-            dim = dims[j]
-            x = xblock[ (cdims[j] - dim) * 2 + 1 : cdims[j] * 2]
-            x = x[1:dim] + im * x[dim + 1: 2*dim]
-            @assert( abs(norm(x / scale - substate[j])) < 1e-6)
-            xx = x * x'
-            prod_ = kron(prod_, xx)
-        end
-        sumtrprod_ += tr(prod_)
-        @assert( abs(norm(prod_ - prod * weight)) < 1e-6)
-
-        if y == 0
-            y = prod * weight
-        else
-            y += prod * weight
-        end
+        total_trace += term_trace
+        kept += 1
     end
-    @assert( abs(tr(y) - 1) < 1e-6)
-    @assert( abs(sumtrprod_ - 1) < 1e-6)
-    return p, nrank1_
+    # tr(kron(v₁v₁', …, vₘvₘ')) = prod(norm(vₖ)^2); checking it needs no
+    # density matrices or repeated tensor products.
+    @assert abs(total_trace - 1) < 1e-6
+    return p, kept
 end
 
 """
@@ -206,36 +212,29 @@ rank-one density tensors, their unit-norm mode vectors, and the convex weights.
 Assumes `p` has already been rescaled to unit total trace.
 """
 function unpackFactors(p, nrank1, sumdim, dims, cdims, nsubs)
-    Xvalss = []
-    Xsubs = []
-    weights = []
-    sumtrprod = 0
+    purestates, substates, weights = [], [], Float64[]
+    total_trace = 0.0
     for i in 1:nrank1
-        xblock = p[(i - 1) * sumdim * 2 + 1 : i * sumdim * 2]
-        prod = 1
+        block = (i - 1) * 2 * sumdim
+        factors = [complex.(view(p, block + 2 * (cdims[j] - dims[j]) + 1:
+                                   block + 2 * (cdims[j] - dims[j]) + dims[j]),
+                            view(p, block + 2 * (cdims[j] - dims[j]) + dims[j] + 1:
+                                   block + 2 * cdims[j])) for j in 1:nsubs]
+        norms_squared = [sum(abs2, v) for v in factors]
+        weight = prod(norms_squared)
+        # A zero component contributes nothing to Psi; avoid dividing it by 0.
+        iszero(weight) && continue
         for j in 1:nsubs
-            dim = dims[j]
-            x = xblock[ (cdims[j] - dim) * 2 + 1 : cdims[j] * 2]
-            x = x[1:dim] + im * x[dim + 1: 2*dim]
-            xx = x * x'
-            prod = kron(prod, xx)
+            factors[j] ./= sqrt(norms_squared[j])
         end
-        trprod = tr(prod)
-        scale = trprod^(1/(2 * nsubs))
-        sumtrprod += trprod
-        subs = []
-        for j in 1:nsubs
-            dim = dims[j]
-            x = xblock[ (cdims[j] - dim) * 2 + 1 : cdims[j] * 2]
-            x = (x[1:dim] + im * x[dim + 1: 2*dim]) / scale
-            push!(subs, x)
-        end
-        push!(Xvalss, prod / trprod)
-        push!(Xsubs, subs)
-        push!(weights, real(trprod))
+        v = reduce(kron, factors)
+        push!(purestates, v * v')
+        push!(substates, factors)
+        push!(weights, weight)
+        total_trace += weight
     end
-    @assert( abs(sumtrprod - 1) < 1e-6)
-    return Xvalss, Xsubs, weights
+    @assert abs(total_trace - 1) < 1e-6
+    return purestates, substates, weights
 end
 
 """

@@ -6,6 +6,7 @@ mutable struct StateSeparator
    leaves::Set{Int}
    maxdepth::Int
    nodes::Vector{Node}
+   nsolved::Int
    dualbd::Float64
    primalbd::Float64
    primaloutbd::Float64
@@ -30,7 +31,7 @@ mutable struct StateSeparator
       selectnode = 1
       seed = MersenneTwister(param.seed)
       status = RelaxUnsolve
-      stateseparator = new(problem, param, opennodes, leaves, maxdepth, nodes,
+      stateseparator = new(problem, param, opennodes, leaves, maxdepth, nodes, 0,
          dualbd, primalbd, primaloutbd, cutoffbound, primalsol, primalHbar, selectnode, seed, status)
       return stateseparator
    end
@@ -53,6 +54,7 @@ mutable struct StateSeparator
 
  function stateseparatorPruneSubtree!(stateseparator::StateSeparator, nodeid::Int)
     node = stateseparator.nodes[nodeid]
+    node.pruned = true
     if nodeHasChilds(node)
        if !stateseparator.nodes[node.childs[1]].pruned
           stateseparatorPruneSubtree!(stateseparator, node.childs[1])
@@ -65,22 +67,16 @@ mutable struct StateSeparator
 
  function stateseparatorUpdateTree!(stateseparator::StateSeparator)
     # prune the nodes
-    while true
-       findprune = false
-       for node in stateseparator.nodes
-          if !node.pruned && node.localdualbd < stateseparator.primalbd - stateseparator.param.obj_tol
-             node.pruned = true
-             findprune = true
-             stateseparatorPruneSubtree!(stateseparator, node.nodeid)
-          end
-          if !node.pruned && nodeHasChilds(node) && stateseparator.nodes[node.childs[1]].pruned && stateseparator.nodes[node.childs[2]].pruned
-             node.pruned = true
-             findprune = true
-             stateseparatorPruneSubtree!(stateseparator, node.nodeid)
-          end
+    for node in stateseparator.nodes
+       if !node.pruned && node.localdualbd < stateseparator.primalbd - stateseparator.param.obj_tol
+          stateseparatorPruneSubtree!(stateseparator, node.nodeid)
        end
-       if !findprune
-          break
+    end
+    # Children are appended after their parent, so a reverse pass propagates
+    # exhausted subtrees without repeatedly scanning the entire tree.
+    for node in Iterators.reverse(stateseparator.nodes)
+       if !node.pruned && nodeHasChilds(node) && all(i -> stateseparator.nodes[i].pruned, node.childs)
+          node.pruned = true
        end
     end
     # construct the set of (unpruned) leaves
@@ -103,6 +99,9 @@ mutable struct StateSeparator
        node = stateseparatorGetNode(stateseparator, leave)
        dualbd = max(dualbd, node.localdualbd)
     end
-    stateseparator.dualbd = dualbd
+    # The oracle searches only above cutoffbound. If that domain is exhausted,
+    # cutoffbound still bounds all excluded states; -Inf is not a valid bound
+    # for the original support function.
+    stateseparator.dualbd = max(dualbd, stateseparator.cutoffbound,
+        stateseparator.primalbd + stateseparator.param.obj_tol)
  end
-

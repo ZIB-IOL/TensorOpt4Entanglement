@@ -12,7 +12,9 @@ function initialLPRelaxation(detector::AbstractEntanglementDetector, param)
     model = Model()
     detector.model = model
     setMosekParam(model, param, true)
-    @variable(model, MI[1:dimH, 1:dimH] in SkewSymmetricMatrixSpace())
+    detector.realmaster = param.cp_real_master && all(iszero, detector.H[:IM])
+    MI = detector.realmaster ? zeros(AffExpr, dimH, dimH) :
+        @variable(model, [1:dimH, 1:dimH] in SkewSymmetricMatrixSpace())
     @variable(model, MR[1:dimH, 1:dimH], Symmetric)
     @variable(model, b)
     detector.M[:RE] = MR
@@ -20,26 +22,38 @@ function initialLPRelaxation(detector::AbstractEntanglementDetector, param)
     detector.b = b
 
     normalizationCondition(detector, param)
+    # For unit-trace states, M -> M+cI and b -> b+c leave every constraint
+    # and the objective unchanged. Remove this free direction from the LP.
+    @constraint(model, tr(MR) == 0)
     objective(detector)
     print(length(detector.purestates), " pure states\n")
-    for state in detector.purestates
-        cons = @constraint(model, dot(detector.M[:RE], real(state)) + dot(detector.M[:IM], imag(state)) - detector.b <= 0)
-        push!(detector.cuts, cons)
+    empty!(detector.cuts)
+    empty!(detector.mastercolumns)
+    empty!(detector.columnkeys)
+    for (i, state) in enumerate(detector.purestates)
+        addCons(detector, state, i)
     end
 end
 
-function addCons(detector::AbstractEntanglementDetector, state)
+function addCons(detector::AbstractEntanglementDetector, state, index = length(detector.purestates))
+    if detector.realmaster
+        key = real(state)
+        haskey(detector.columnkeys, key) && return false
+        detector.columnkeys[key] = index
+    end
     cons = @constraint(detector.model, dot(detector.M[:RE], real(state)) + dot(detector.M[:IM], imag(state)) - detector.b <= 0)
     push!(detector.cuts, cons)
+    push!(detector.mastercolumns, index)
+    return true
 end
 
 function poolAdd(detector::AbstractEntanglementDetector, param::Param)
     for (ind, state) in enumerate(detector.poolpurestates)
         if detector.poolstats[ind] > 0 && detector.poolstats[ind] < detector.round
-            addCons(detector, detector.poolpurestates[ind])
             push!(detector.substates, detector.poolsubstates[ind])
             push!(detector.purestates, detector.poolpurestates[ind])
             push!(detector.ispersistent, false)
+            addCons(detector, detector.poolpurestates[ind])
         end
     end
 end
@@ -150,8 +164,8 @@ end
 function checkTerminationGap(detector::AbstractEntanglementDetector, primalobj, cutactiveness, cutdualactiveness, valueb, dualobj, param)
     addstate = cutactiveness > valueb
     terminate = false
-    newdualobj = primalobj + valueb - cutdualactiveness
-    if cutdualactiveness < valueb
+    newdualobj = primalobj + min(0.0, valueb - cutdualactiveness)
+    if cutdualactiveness <= valueb + param.master_obj_tol
         print("the state is entangled, because the primal obj is positive and optimal (no violated constraint)\n")
         terminate = true
     else
@@ -161,5 +175,3 @@ function checkTerminationGap(detector::AbstractEntanglementDetector, primalobj, 
     end
     return terminate, addstate, newdualobj
 end
-
-

@@ -28,7 +28,7 @@ const E = ExactEntanglement
         end
     end
 
-    @testset "DDPS+ is the default and is unchanged" begin
+    @testset "DDPS+ is the default with complete McCormick envelopes" begin
         @test Param().relaxation === :ddpsplus
         dims = [2, 2, 2]; d = prod(dims)
         s = E.relaxationStats(Matrix(Diagonal(ones(d))) / d, zeros(d, d), dims, Param(log_level = 0))
@@ -36,7 +36,7 @@ const E = ExactEntanglement
         # partial-trace consistency, DDPS+ adds the scalar McCormick cuts; the
         # tensor McCormick PSD cuts are no longer part of either mode.
         @test s.nvars == 92
-        @test s.ncons == 1036
+        @test s.ncons == 1676
     end
 
     @testset "peak RSS is reported" begin

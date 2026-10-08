@@ -33,18 +33,26 @@ Cutting plane (CP) and active set
   `pool_size`       pool capacity (`-1` = unbounded)
   `loop`            IR iteration budget; negative values are run-mode
                     sentinels, see `refinementBudget`
+  `cp_real_master`  real witness and conjugate-pair columns for real targets
+  `cp_rounds_per_ir` optional CP round cap in intermediate IR passes (-1 = off)
+  `cp_certify_every` stabilise the witness and certify at the root every N
+                     rounds (0 = off); IR also stabilises its returned witness
+  `ir_refit_scalar` refit the mixing scalar after trimming the CP support
 
 sBB linear-minimisation oracle
   `maxnnodes`       node limit for ordinary CP iterations
   `maxeffortnnodes` node limit for gap-closing iterations
+  `heur_sbb_maxiter` coordinate updates per eigenvector heuristic start
+  `heur_sbb_restarts` random starts before solving the root relaxation
+  `heur_sbb_node_restarts` starts guided by each node's relaxed local states
   `minnnodes`       minimum nodes before an early stop is reported
   `max_obbt`        rounds of optimisation-based bound tightening (0 = off)
   `relaxation`      which convex relaxation the sBB oracle uses:
                     `:ddps`     the DDPS outer approximation alone -- one PSD,
                                 unit-trace Z per tree node plus partial-trace
                                 consistency with its children
-                    `:ddpsplus` (default) DDPS strengthened with the tensor and
-                                scalar complex McCormick inequalities
+                    `:ddpsplus` (default) DDPS strengthened with the scalar
+                                complex McCormick inequalities
   `is_last`         set once the run enters its gap-closing phase
   `tratio`          fraction of `time_limit` reserved for that phase
 
@@ -79,6 +87,9 @@ mutable struct Param
    maxnnodes::Int
    maxeffortnnodes::Int
    minnnodes::Int
+   heur_sbb_maxiter::Int
+   heur_sbb_restarts::Int
+   heur_sbb_node_restarts::Int
    maxrounds::Int
    seed::Int
    heur_LADMM1_maxiter::Int
@@ -87,6 +98,8 @@ mutable struct Param
    heur_LADMM_step_tol::Float64
    heur_LADMM_gd_tol::Float64
    heur_LADMM_rho::Float64
+   heur_LADMM_penalty_update::Symbol
+   heur_LADMM_conjugates::Bool
    heur_MANOPT_maxiter::Int
    heur_MANOPT1_maxiter::Int
    heur_alternate_iter::Int
@@ -102,6 +115,10 @@ mutable struct Param
    pool_size::Int
    pointsize_bound::Int
    rank_bound::Int
+   cp_real_master::Bool
+   cp_rounds_per_ir::Int
+   cp_certify_every::Int
+   ir_refit_scalar::Bool
    pdgr::PDGR.Options
 
    function Param(;
@@ -116,6 +133,9 @@ mutable struct Param
          maxnnodes::Int = 100,
          maxeffortnnodes::Int = 200,
          minnnodes::Int = 0,
+         heur_sbb_maxiter::Int = 100,
+         heur_sbb_restarts::Int = 1,
+         heur_sbb_node_restarts::Int = 4,
          maxrounds::Int = 100,
          seed::Int = 12345,
          heur_LADMM1_maxiter::Int = 5,
@@ -124,6 +144,8 @@ mutable struct Param
          heur_LADMM_step_tol::Float64 = 1e-4,
          heur_LADMM_gd_tol::Float64 = 1e-4,
          heur_LADMM_rho::Float64 = 1.0,
+         heur_LADMM_penalty_update::Symbol = :legacy,
+         heur_LADMM_conjugates::Bool = false,
          heur_MANOPT_maxiter::Int = 150,
          heur_MANOPT1_maxiter::Int = 150,
          heur_alternate_iter::Int = 10,
@@ -139,15 +161,30 @@ mutable struct Param
          pool_size::Int = 5000,
          pointsize_bound::Int = 100,
          rank_bound::Int = 500,
+         cp_real_master::Bool = false,
+         cp_rounds_per_ir::Int = -1,
+         cp_certify_every::Int = 0,
+         ir_refit_scalar::Bool = false,
          pdgr::PDGR.Options = PDGR.Options())
+      heur_LADMM_penalty_update in (:balance, :legacy) ||
+         throw(ArgumentError("LADMM penalty update must be :balance or :legacy"))
+      (cp_rounds_per_ir == -1 || cp_rounds_per_ir > 0) || throw(ArgumentError("CP rounds per IR pass must be -1 or positive"))
+      cp_certify_every >= 0 || throw(ArgumentError("CP certification interval must be nonnegative"))
+      heur_sbb_maxiter > 0 || throw(ArgumentError("sBB heuristic iterations must be positive"))
+      heur_sbb_restarts > 0 || throw(ArgumentError("sBB heuristic restarts must be positive"))
+      heur_sbb_node_restarts > 0 || throw(ArgumentError("sBB node heuristic restarts must be positive"))
       new(solver, time_limit, obj_tol, master_obj_tol, tol, feas_tol, log_level,
-          thread, maxnnodes, maxeffortnnodes, minnnodes, maxrounds, seed,
+          thread, maxnnodes, maxeffortnnodes, minnnodes, heur_sbb_maxiter,
+          heur_sbb_restarts, heur_sbb_node_restarts, maxrounds, seed,
           heur_LADMM1_maxiter, heur_LADMM_maxiter, heur_LADMM_obj_tol,
           heur_LADMM_step_tol, heur_LADMM_gd_tol, heur_LADMM_rho,
-          heur_MANOPT_maxiter, heur_MANOPT1_maxiter, heur_alternate_iter,
+          heur_LADMM_penalty_update, heur_LADMM_conjugates,
+          heur_MANOPT_maxiter, heur_MANOPT1_maxiter,
+          heur_alternate_iter,
           heur_alternate1_iter, heur_alternate_maxfail, max_obbt, relaxation,
           loop, start_time, is_last, tratio, lazification, pool_size,
-          pointsize_bound, rank_bound, pdgr)
+          pointsize_bound, rank_bound, cp_real_master, cp_rounds_per_ir,
+          cp_certify_every, ir_refit_scalar, pdgr)
    end
 end
 
@@ -157,6 +194,9 @@ end
 Seconds since the run started.
 """
 elapsedTime(param::Param) = time() - param.start_time
+
+"Seconds left in the shared solver budget; model setup also consumes this budget."
+remainingTime(param::Param) = max(param.time_limit - elapsedTime(param), 0.0)
 
 """
     isTimeLimitExceeded(param)
@@ -185,16 +225,12 @@ end
 """
     extendTimeLimit!(param)
 
-Enter the gap-closing phase: mark the run as `is_last` and give back the time
-already spent beyond the `1 - tratio` mark, so the final sBB calls get the full
-`tratio` share of the budget.
+Enter the gap-closing phase without extending the requested wall-clock budget.
+The historical function name is retained for callers.
 """
 function extendTimeLimit!(param::Param)
-   elapsed = elapsedTime(param)
-   extra = max(elapsed - (1 - param.tratio) * param.time_limit, 0)
    param.log_level > 0 &&
-      println("entering gap-closing phase: time limit $(param.time_limit) -> $(param.time_limit + extra) s")
+      println("entering gap-closing phase: $(remainingTime(param)) s remain")
    param.is_last = true
-   param.time_limit += extra
    return param
 end

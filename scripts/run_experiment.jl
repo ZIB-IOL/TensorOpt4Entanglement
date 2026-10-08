@@ -30,9 +30,20 @@ function parseCommandline()
             arg_type = Int
             default = 1
         "--maxnnodes"
-            help = "Maximum number of nodes"
+            help = "Maximum sBB node solves per ordinary oracle call (default: size preset)"
             arg_type = Int
-            default = 100
+        "--maxeffortnnodes"
+            help = "Maximum sBB node solves per gap-closing oracle call (default: size preset)"
+            arg_type = Int
+        "--heur-sbb-maxiter"
+            help = "Coordinate updates per eigenvector heuristic start (default: 100)"
+            arg_type = Int
+        "--heur-sbb-restarts"
+            help = "Random eigenvector heuristic starts before the sBB root (default: 1)"
+            arg_type = Int
+        "--heur-sbb-node-restarts"
+            help = "Eigenvector heuristic starts guided by each node relaxation (default: 4)"
+            arg_type = Int
         "--minnnodes"
             help = "Minimum number of nodes"
             arg_type = Int
@@ -42,17 +53,33 @@ function parseCommandline()
             arg_type = Int
             default = 100
         "--heur-ladmm1-maxiter"
-            help = "Heuristic LADMM1 maximum iterations"
+            help = "LADMM outer iterations in the first IR pass (default: size preset)"
             arg_type = Int
-            default = 16
         "--heur-ladmm-maxiter"
-            help = "Heuristic LADMM maximum iterations"
+            help = "LADMM outer iterations after the first IR pass (default: size preset)"
             arg_type = Int
-            default = 8
         "--heur-manopt-maxiter"
-            help = "Heuristic MANOPT maximum iterations"
+            help = "Manopt iterations per inner solve (default: size preset; doubled for standalone LADMM)"
             arg_type = Int
-            default = 150
+        "--heur-ladmm-penalty-update"
+            help = "LADMM penalty update: balance or legacy (default: size/algorithm preset)"
+            arg_type = String
+        "--heur-ladmm-conjugates"
+            help = "Add conjugate product columns at the LADMM-to-CP crossover for real targets"
+            arg_type = Bool
+            default = false
+        "--cp-real-master"
+            help = "Real CP master with conjugate-pair reconstruction (default: size/algorithm preset)"
+            arg_type = Bool
+        "--cp-rounds-per-ir"
+            help = "CP rounds per intermediate IR pass (-1 disables the cap; default: size/algorithm preset)"
+            arg_type = Int
+        "--cp-certify-every"
+            help = "Stabilise the witness and certify at the sBB root every N CP rounds (0 disables; default: preset)"
+            arg_type = Int
+        "--ir-refit-scalar"
+            help = "Refit the scalar after CP rank trimming (default: size/algorithm preset)"
+            arg_type = Bool
         "--relaxation"
             help = "sBB relaxation: ddpsplus (DDPS + McCormick, default) or ddps"
             arg_type = String

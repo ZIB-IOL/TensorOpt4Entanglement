@@ -1,30 +1,28 @@
+# Scalar McCormick envelopes, including collapsed (fixed) intervals.
+function branchProductBounds(x, y, lx, ux, ly, uy)
+    lx == ux && (x = lx)
+    ly == uy && (y = ly)
+    lower = max(x * ly + y * lx - lx * ly, x * uy + y * ux - ux * uy)
+    upper = min(x * ly + y * ux - ux * ly, x * uy + y * lx - lx * uy)
+    return lower, upper
+end
+
 function branchViolation(vars, bounds, zval, zrcosts = nothing)
-    lowers = Dict((:RE,:RE) => 0., (:IM,:IM) => 0.,
-    (:RE,:IM) => 0., (:IM, :RE) => 0.)
-    uppers = Dict((:RE,:RE) => 0., (:IM,:IM) => 0.,
-    (:RE,:IM) => 0., (:IM, :RE) => 0.)
-    zestimates = Dict((:RE,:L) => 0., (:IM,:L) => 0.,
-    (:RE,:U) => 0., (:IM, :U) => 0.)
-    # compute affine lower and upper estimators for each product of parts of variables
-    for var1part in (:RE,:IM)
-        for var2part in (:RE,:IM)
-            lowers[var1part, var2part] = maximum(affine(vars[var1part][1], vars[var2part][2], bounds[var1part,:L][1], bounds[var2part,:L][2], bounds[var1part,:U][1], bounds[var2part,:U][2]))
-            uppers[var1part, var2part] = minimum(affine(vars[var1part][1], vars[var2part][2], bounds[var1part,:U][1], bounds[var2part,:L][2], bounds[var1part,:L][1], bounds[var2part,:U][2]))
-        end
-    end
-    zestimates[:RE,:L] = lowers[:RE, :RE] - uppers[:IM, :IM]
-    zestimates[:RE,:U] = uppers[:RE, :RE] - lowers[:IM, :IM]
-    zestimates[:IM,:L] = lowers[:IM, :RE] + lowers[:RE, :IM]
-    zestimates[:IM,:U] = uppers[:IM, :RE] + uppers[:RE, :IM]
-    violation = 0.0
+    envelope(a,b) = branchProductBounds(vars[a][1], vars[b][2],
+        bounds[a,:L][1], bounds[a,:U][1], bounds[b,:L][2], bounds[b,:U][2])
+    lrr, urr = envelope(:RE,:RE)
+    lii, uii = envelope(:IM,:IM)
+    lir, uir = envelope(:IM,:RE)
+    lri, uri = envelope(:RE,:IM)
+    re_lower = max(lrr - uii - zval[:RE], 0.0)
+    re_upper = max(zval[:RE] - (urr - lii), 0.0)
+    im_lower = max(lir + lri - zval[:IM], 0.0)
+    im_upper = max(zval[:IM] - (uir + uri), 0.0)
     if isnothing(zrcosts)
-        violation += max(zestimates[:RE,:L] - zval[:RE], 0) + max(zval[:RE] - zestimates[:RE,:U], 0)
-        violation += max(zestimates[:IM,:L] - zval[:IM], 0) + max(zval[:IM] - zestimates[:IM,:U], 0)
-    else
-        violation += (max(zestimates[:RE,:L] - zval[:RE], 0) - max(zval[:RE] - zestimates[:RE,:U], 0)) * zrcosts[:RE]
-        violation += (max(zestimates[:IM,:L] - zval[:IM], 0) - max(zval[:IM] - zestimates[:IM,:U], 0)) * zrcosts[:IM]
+        return re_lower + re_upper + im_lower + im_upper
     end
-    return violation
+    return (re_lower - re_upper) * zrcosts[:RE] +
+           (im_lower - im_upper) * zrcosts[:IM]
 end
 
 # violation branching
@@ -34,19 +32,12 @@ function mixBranch3(stateseparator::StateSeparator, focusnode::Node, sol)
     BST = stateseparator.problem.BST
     Zdims = stateseparator.problem.Zdims
     Zvals = sol.Zvals
-    Zscores = []
     Zgapscores = []
-    Zbdscores = []
-    minbound = typemax(Float64)
-    maxbound = 0.0
-    maxgap = 0.0
-    mingap = typemax(Float64)
     # create score matrices
     function createZscores(sys, leftsys, rightsys, retleft, retright)
         Zind = sys.Zind
         dim = Zdims[Zind]
         push!(Zgapscores, Dict(:RE=> zeros(dim, dim), :IM=> zeros(dim, dim)))
-        push!(Zbdscores, Dict(:RE=> zeros(dim, dim), :IM=> zeros(dim, dim)))
         return nothing
     end
     traverseDPSBST(1, BST, createZscores)
@@ -77,12 +68,17 @@ function mixBranch3(stateseparator::StateSeparator, focusnode::Node, sol)
                     for l in 1:2
                         # the var's part to change
                         for part in (:RE, :IM)
-                            boundsdown = deepcopy(bounds)
-                            boundsdown[part, :U][l] = vars[part][l]
-                            boundsup = deepcopy(bounds)
-                            boundsup[part, :L][l] = vars[part][l]
-                            violationdown = branchViolation(vars, boundsdown, zvals)
-                            violationup = branchViolation(vars, boundsup, zvals)
+                            # These bounds are private to this matrix entry.
+                            # Temporarily split one endpoint instead of copying
+                            # four bound vectors for every candidate.
+                            lower = bounds[part, :L][l]
+                            upper = bounds[part, :U][l]
+                            bounds[part, :U][l] = vars[part][l]
+                            violationdown = branchViolation(vars, bounds, zvals)
+                            bounds[part, :U][l] = upper
+                            bounds[part, :L][l] = vars[part][l]
+                            violationup = branchViolation(vars, bounds, zvals)
+                            bounds[part, :L][l] = lower
                             # NB: the `+ 1/6 * max(...)` term used to sit on its own
                             # continuation line, which Julia parsed as a separate
                             # statement and discarded. It is part of the score.
@@ -99,11 +95,12 @@ function mixBranch3(stateseparator::StateSeparator, focusnode::Node, sol)
     traverseDPSBST(1, BST, getZscores)
 
     bestpart = :RE
-    bestZind = 1
+    bestZind = 0
     bestdepth = 0
     bestj = 1
     bestk = 1
     bestscore = 0.0
+    bestwidth = 0.0
 
     function bestcandidate(sys, leftsys, rightsys, retleft, retright)
         if sys.parent == -1
@@ -112,15 +109,20 @@ function mixBranch3(stateseparator::StateSeparator, focusnode::Node, sol)
         Zind = sys.Zind
         dim = Zdims[Zind]
         for j in 1:dim
-            for k in 1:dim
+            for k in j:dim
                 for part in (:RE,:IM)
                     score = Zgapscores[Zind][part][j,k]
-                    if score > bestscore && !haskey( focusnode.fixvars, (Zind, part, j, k))
+                    j != k && (score += Zgapscores[Zind][part][k,j])
+                    width = ZBs[Zind][part,:U][j,k] - ZBs[Zind][part,:L][j,k]
+                    if width > param.feas_tol && !haskey(focusnode.fixvars, (Zind, part, j, k)) &&
+                            !haskey(focusnode.fixvars, (Zind, part, k, j)) &&
+                            (score > bestscore || (score == bestscore && width > bestwidth))
                         bestpart = part
                         bestZind = Zind
                         bestj = j
                         bestk = k
                         bestscore = score
+                        bestwidth = width
                         bestdepth = sys.depth
                     end
                 end
@@ -128,6 +130,8 @@ function mixBranch3(stateseparator::StateSeparator, focusnode::Node, sol)
         end
     end
     traverseDPSBST(1, BST, bestcandidate)
+
+    bestZind == 0 && return nothing, 0.0
 
     bestval = Zvals[bestZind][bestpart][bestj, bestk]
     bestval = abs(bestval) < param.feas_tol ? 0.0 : bestval
@@ -149,15 +153,17 @@ function stateseparatorCreateBranchNodes!(stateseparator::StateSeparator, node::
     delete!(stateseparator.leaves, node.nodeid)
     nodedown = Node(endnodeid + 1, node.nodeid, endnodeid + 2, node.depth + 1, true, deepcopy(node.ZBs), deepcopy(node.fixvars))
     nodeup = Node(endnodeid + 2, node.nodeid, endnodeid + 1, node.depth + 1, true, deepcopy(node.ZBs), deepcopy(node.fixvars))
-    if abs( node.ZBs[Zind][(part, :U)][i, j] - node.ZBs[Zind][(part, :L)][i, j] ) < stateseparator.param.feas_tol
-        brpoint = (node.ZBs[Zind][(part, :U)][i, j] + node.ZBs[Zind][(part, :L)][i, j]) / 2
-    elseif abs( brpoint - nodedown.ZBs[Zind][(part, :L)][i, j] ) < stateseparator.param.feas_tol
-        nodedown.fixvars[(Zind, part, i, j)] = brpoint
-    elseif abs( brpoint - nodeup.ZBs[Zind][(part, :U)][i, j] ) < stateseparator.param.feas_tol
-        nodeup.fixvars[(Zind, part, i, j)] = brpoint
-    end
-    nodedown.ZBs[Zind][(part, :U)][i, j] = brpoint
-    nodeup.ZBs[Zind][(part, :L)][i, j] = brpoint
+    # Unsolved children retain a valid bound when a shared deadline interrupts
+    # the next node solve. Their parent's bound applies to both subdomains.
+    nodedown.localdualbd = nodeup.localdualbd = node.localdualbd
+    lower = node.ZBs[Zind][part, :L][i, j]
+    upper = node.ZBs[Zind][part, :U][i, j]
+    # A split at a boundary leaves one child unchanged. Keep both children
+    # strictly smaller while preserving their union as the parent interval.
+    margin = 0.1 * (upper - lower)
+    brpoint = clamp(brpoint, lower + margin, upper - margin)
+    tightenEntryBounds!(nodedown,Zind,part,i,j,lower,brpoint)
+    tightenEntryBounds!(nodeup,Zind,part,i,j,brpoint,upper)
     stateseparatorAddNode!(stateseparator, nodedown)
     stateseparatorAddNode!(stateseparator, nodeup)
     node.childs = [endnodeid + 1, endnodeid + 2]

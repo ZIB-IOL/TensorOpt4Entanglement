@@ -49,56 +49,29 @@ function initalDensityMats(dims, seed)
 end
 
 function partialInnerProductMap(A, C, D)
-    """
-    Most efficient vectorized version using Einstein summation pattern.
-
-    We use the fact that:
-    ⟨A ⊗ E_ij ⊗ C, D⟩ = Σ_{α,β,γ,δ} A[α,γ] * C[β,δ] * D[row,col]
-    where row = (α-1)*n*p + (i-1)*p + β + 1
-          col = (γ-1)*n*p + (j-1)*p + δ + 1
-    """
-    m, _ = size(A)
-    p, _ = size(C)
-    total_size = size(D, 1)
-    n = total_size ÷ (m * p)
-
+    # Contract the other factors directly, without slicing a block of D for
+    # every entry. The conjugation is the Hilbert--Schmidt inner product.
+    m = size(A, 1)
+    p = size(C, 1)
+    n = size(D, 1) ÷ (m * p)
     result = zeros(ComplexF64, n, n)
-
-    # Pre-compute all possible row and column indices
-    for i in 1:n, j in 1:n
-        # Use broadcasting to compute all combinations at once
-        α_range = 1:m
-        β_range = 1:p
-        γ_range = 1:m
-        δ_range = 1:p
-
-        # Compute row and column indices for all combinations
-        rows = [(α-1)*n*p + (i-1)*p + β for α in α_range, β in β_range]
-        cols = [(γ-1)*n*p + (j-1)*p + δ for γ in γ_range, δ in δ_range]
-
-        # Extract the relevant submatrix from D
-        D_sub = D[rows[:], cols[:]]  # m*p × m*p matrix
-
-        # Reshape to separate the A and C components
-        D_reshaped = reshape(D_sub, m, p, m, p)
-
-        # Contract with A and C using Einstein summation
-        # result[i,j] = Σ_{α,β,γ,δ} A[α,γ] * C[β,δ] * D[α,β,γ,δ]
-        result[i, j] = sum( real(A[α,γ] * C[β,δ]) * real(D_reshaped[α,β,γ,δ]) + imag(A[α,γ] * C[β,δ]) * imag(D_reshaped[α,β,γ,δ])
-            + im * (real(A[α,γ] * C[β,δ]) * imag(D_reshaped[α,β,γ,δ]) - imag(A[α,γ] * C[β,δ]) * real(D_reshaped[α,β,γ,δ]))
-            for α in 1:m, β in 1:p, γ in 1:m, δ in 1:p)
+    @inbounds for δ in 1:p, γ in 1:m, β in 1:p, α in 1:m
+        coefficient = conj(A[α, γ] * C[β, δ])
+        for j in 1:n, i in 1:n
+            row = (α - 1) * n * p + (i - 1) * p + β
+            col = (γ - 1) * n * p + (j - 1) * p + δ
+            result[i, j] += coefficient * D[row, col]
+        end
     end
-
     return result
 end
 
 function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
     problem = stateseparator.problem
-    dimH = problem.dimH
     param = stateseparator.param
     dims = problem.dims
     nsubs = problem.nsubs
-    maxiter = 100
+    maxiter = param.heur_sbb_maxiter
     if isnothing(Xvals_)
         Xvals = initalDensityMats(dims, stateseparator.seed)
     else
@@ -108,13 +81,14 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
     Xvals = principleSubStatesMat(Xvals)
     bestHbar = constructFullSol(Xvals)
     bestobj = dot(real(bestHbar), problem.H[:RE]) + dot(imag(bestHbar), problem.H[:IM])
-    bestXvals = Xvals
-    prevobj = bestobj
-    fail = 0
+    bestXvals = deepcopy(Xvals)
+    sweepobj = bestobj
+    H = problem.H[:RE] + im * problem.H[:IM]
+    X = [Xvals[:RE][j] + im * Xvals[:IM][j] for j in 1:nsubs]
 
     for i in 1:maxiter
+        remainingTime(param) <= 0 && break
         sys = i % nsubs + 1
-        X = [Xvals[:RE][j] + im * Xvals[:IM][j] for j in 1:nsubs]
 
         kron_prod_left = Matrix{ComplexF64}(I, 1, 1)
         kron_prod_right = Matrix{ComplexF64}(I, 1, 1)
@@ -125,9 +99,8 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
                 kron_prod_right = kron(kron_prod_right, X[l])
             end
         end
-        gX = partialInnerProductMap(Matrix(kron_prod_left), Matrix(kron_prod_right), problem.H[:RE] + im * problem.H[:IM])
-        rgX = (gX + gX') / 2
-        eigvals, eigvecs = eigen(rgX)
+        gX = partialInnerProductMap(kron_prod_left, kron_prod_right, H)
+        eigvals, eigvecs = eigen(Hermitian((gX + gX') / 2))
         # Extract the eigenvector corresponding to the maximum eigenvalue
         maxndex = argmax(real(eigvals))   # Index of the maximum eigenvalue
         x = eigvecs[:, maxndex]     # Corresponding eigenvector
@@ -138,6 +111,7 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
 
         Xvals[:RE][sys] = real(principle)
         Xvals[:IM][sys] = imag(principle)
+        X[sys] = principle
 
         Hbar = constructFullSol(Xvals)
         obj = dot(real(Hbar), problem.H[:RE]) + dot(imag(Hbar), problem.H[:IM])
@@ -146,17 +120,13 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
             bestXvals = deepcopy(Xvals)
             bestHbar = deepcopy(Hbar)
             bestobj = obj
-        else
-            fail += 1
         end
-        if abs(obj - prevobj) < param.obj_tol
-            break
+        # One stationary coordinate does not imply stationarity of the other
+        # factors. Test convergence only after all subsystems have been visited.
+        if i % nsubs == 0
+            bestobj - sweepobj < param.obj_tol && break
+            sweepobj = bestobj
         end
-        if fail >= 5
-            break
-        end
-        prevobj = obj
-        i += 1
     end
     if bestobj > stateseparator.primalbd
         stateseparator.primalbd = bestobj
@@ -173,13 +143,43 @@ function AlternativeDescentEigen(stateseparator::StateSeparator, Xvals_)
 end
 
 function RunHeuristicsRoot(stateseparator::StateSeparator)
-    problem = stateseparator.problem
-    AlternativeDescentEigen(stateseparator, nothing)
+    result = nothing
+    for _ in 1:stateseparator.param.heur_sbb_restarts
+        remainingTime(stateseparator.param) <= 0 && break
+        result = AlternativeDescentEigen(stateseparator, nothing)
+    end
+    return result
 end
 
 function RunHeuristics(stateseparator::StateSeparator, sol)
-    problem = stateseparator.problem
-    Xvals = AlternativeDescentEigen(stateseparator::StateSeparator, sol.Xvals)
-    return Xvals
-end
+    bestX = AlternativeDescentEigen(stateseparator, sol.Xvals)
+    starts = stateseparator.param.heur_sbb_node_restarts
+    (starts == 1 || remainingTime(stateseparator.param) <= 0) && return bestX
 
+    # Sample pure factors with covariance given by the relaxed marginal. A
+    # small isotropic component also explores directions omitted by nearly
+    # rank-one marginals. Every sample is still a feasible product state.
+    transforms = Matrix{ComplexF64}[]
+    for i in eachindex(sol.Xvals[:RE])
+        X = sol.Xvals[:RE][i] + im * sol.Xvals[:IM][i]
+        λ,U = eigen(Hermitian((X + X') / 2))
+        λ = max.(λ,0.0)
+        total = sum(λ)
+        λ = total > 0 ? λ / total : fill(1 / length(λ),length(λ))
+        push!(transforms,U * Diagonal(sqrt.(0.95 .* λ .+ 0.05 / length(λ))))
+    end
+    H = stateseparator.problem.H[:RE] + im * stateseparator.problem.H[:IM]
+    bestscore = real(dot(H,constructFullSol(bestX)))
+    for _ in 2:starts
+        remainingTime(stateseparator.param) <= 0 && break
+        factors = [T * randn(stateseparator.seed,ComplexF64,size(T,2)) for T in transforms]
+        densities = [v * v' / real(dot(v,v)) for v in factors]
+        initial = Dict(:RE=>real.(densities),:IM=>imag.(densities))
+        X = AlternativeDescentEigen(stateseparator,initial)
+        score = real(dot(H,constructFullSol(X)))
+        if score > bestscore
+            bestX,bestscore = X,score
+        end
+    end
+    return bestX
+end

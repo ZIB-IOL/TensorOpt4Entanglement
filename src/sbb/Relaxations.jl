@@ -71,8 +71,8 @@ end
 """
     addProximalCuts!(model, problem, Y)
 
-Cut off the half-spaces behind `problem.proximal` (the previous incumbent),
-when one has been recorded.
+Experimental restrictions around `problem.proximal`. These can exclude valid
+product states, so they are not used by the certifying oracle or OBBT.
 """
 function addProximalCuts!(model::Model, problem::Problem, Y)
     isnothing(problem.proximal) && return
@@ -95,7 +95,6 @@ function buildRelaxationTrivial(problem::Problem, cutoffbd::Float64)
     @objective(model, Max, t)
     @constraint(model, cutoffbd <= t)
     @constraint(model, problem.cutoffbound <= dot(problem.Hout[:RE], Y[:RE]) + dot(problem.Hout[:IM], Y[:IM]))
-    addProximalCuts!(model, problem, Y)
 
     return optmodel
 end
@@ -137,7 +136,9 @@ function buildRelaxationBound(problem::Problem, cutoffbd::Float64, eZind, epart,
         @constraint(model, problem.cutoffbound <= dot(problem.Hout[:RE], Y[:RE]) + dot(problem.Hout[:IM], Y[:IM]))
     end
     @objective(model, Min, direction == :L ? Zs[epart][eZind][ej, ek] : -Zs[epart][eZind][ej, ek])
-    addProximalCuts!(model, problem, Y)
+    # A local OBBT solve may restrict the witness objective, but never uses
+    # the unproved proximal restrictions. Global bounds also omit the witness
+    # objective because they are reused for later witnesses.
 
     return optmodel
 end
@@ -301,18 +302,20 @@ function addComplexMcCormickConstraints(stateseparator::StateSeparator, optmodel
                             overs[var1part, var2part] = affine(vars[var1part][1], vars[var2part][2], bounds[var1part,:U][1], bounds[var2part,:L][2], bounds[var1part,:L][1], bounds[var2part,:U][2])
                         end
                     end
-                    # add cuts
+                    # Each product has two independent affine bounds. Combining
+                    # their difference/sum requires all pairs, not just zipped
+                    # pairs: max(l₁,l₂)-min(u₁,u₂) = maxᵢⱼ(lᵢ-uⱼ).
                     zvars = Dict(:RE=>ZRs[Zind][tj,tk], :IM=>ZIs[Zind][tj,tk])
-                    for (a1,a2) in zip(unders[:RE, :RE], overs[:IM,:IM])
+                    for a1 in unders[:RE, :RE], a2 in overs[:IM,:IM]
                         @constraint(model, zvars[:RE] >=  a1 - a2)
                     end
-                    for (a1,a2) in zip(overs[:RE, :RE], unders[:IM,:IM])
+                    for a1 in overs[:RE, :RE], a2 in unders[:IM,:IM]
                         @constraint(model, zvars[:RE] <=  a1 - a2 )
                     end
-                    for (a1,a2) in zip(unders[:RE, :IM], unders[:IM,:RE])
+                    for a1 in unders[:RE, :IM], a2 in unders[:IM,:RE]
                         @constraint(model, zvars[:IM] >=  a1 + a2)
                     end
-                    for (a1,a2) in zip(overs[:RE, :IM], overs[:IM,:RE])
+                    for a1 in overs[:RE, :IM], a2 in overs[:IM,:RE]
                         @constraint(model, zvars[:IM] <=  a1 + a2)
                     end
                 end

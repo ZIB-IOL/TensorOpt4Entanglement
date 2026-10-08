@@ -21,10 +21,15 @@ function BoundTighten(stateseparator::StateSeparator, focusnode::Node, globalobb
                         end
                         if !haskey( focusnode.fixvars, (Zind, part, tj, tk) )
                             for direction in (:L, :U)
+                                remainingTime(stateseparator.param) <= 0 && return
                                 optmodel = initRelaxationBound(stateseparator, focusnode, primalbd, Zind, part, tj, tk, direction, globalobbt)
                                 status, solverstatus, sol = solveModel(optmodel, BST, stateseparator.param, true)
                                 if !isnothing(status) &&  (status == RelaxFeasible || status == RelaxOptimal)
-                                    focusnode.ZBs[Zind][part, direction][tj, tk] = direction == :L ? sol.dualobj - stateseparator.param.tol : - sol.dualobj + stateseparator.param.tol
+                                    lower = focusnode.ZBs[Zind][part,:L][tj,tk]
+                                    upper = focusnode.ZBs[Zind][part,:U][tj,tk]
+                                    direction == :L ? (lower = sol.dualobj - stateseparator.param.tol) :
+                                        (upper = -sol.dualobj + stateseparator.param.tol)
+                                    tightenEntryBounds!(focusnode,Zind,part,tj,tk,lower,upper)
                                 end
                             end
                             tol = stateseparator.param.feas_tol * maximum((1,0,abs( focusnode.ZBs[Zind][part, :U][tj, tk]), abs(focusnode.ZBs[Zind][part, :L][tj, tk]) ))

@@ -17,6 +17,9 @@ mutable struct ThresholdEntanglementDetector <: AbstractEntanglementDetector
     poolsubstates
     poolstats
     round
+    realmaster::Bool
+    mastercolumns::Vector{Int}
+    columnkeys::Dict{Matrix{Float64},Int}
     function ThresholdEntanglementDetector(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, purestates, substates)
         dimH = reduce(*, dims)
         nsubs = length(dims)
@@ -30,9 +33,12 @@ mutable struct ThresholdEntanglementDetector <: AbstractEntanglementDetector
         detector.persistentInds = []
         detector.poolpurestates = []
         detector.poolsubstates = []
-        detector.ispersistent = []
+        detector.ispersistent = fill(false, length(purestates))
         detector.poolstats = []
         detector.round = 0
+        detector.realmaster = false
+        detector.mastercolumns = Int[]
+        detector.columnkeys = Dict{Matrix{Float64},Int}()
         return detector
     end
 end
@@ -40,7 +46,7 @@ end
 function addBatchStates(detector::ThresholdEntanglementDetector, purestates, substates, addtoPool=false)
     append!(detector.purestates, purestates)
     append!(detector.substates, substates)
-    append!(detector.ispersistent, [false] * length(purestates))
+    append!(detector.ispersistent, fill(false, length(purestates)))
 
     if addtoPool
         append!(detector.poolpurestates, purestates)
@@ -59,7 +65,7 @@ function clearStates(detector::ThresholdEntanglementDetector, clearall = false)
         println("clear non persistent states ", length(detector.persistentInds))
         detector.purestates = [detector.purestates[ind] for ind in detector.persistentInds]
         detector.substates = [detector.substates[ind] for ind in detector.persistentInds]
-        detector.ispersistent  = [true] * length(detector.persistentInds)
+        detector.ispersistent = fill(true, length(detector.persistentInds))
         detector.persistentInds = [ind for ind in 1:length(detector.persistentInds)]
     end
     detector.cuts = []
@@ -171,8 +177,9 @@ function initialActiveSet(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector
     weights = vcat([2.0 / denom for _ in 1:npersistent], [1.0 / denom for _ in 1:ncomplementpoints])
     @assert length(weights) == length(detector.substates) "Weights and substates must have the same length $(length(weights)) != $(length(detector.substates))"
 
-    nnz = max(param.pointsize_bound - param.rank_bound, 0)
-    return detector, weights, detector.purestates[end-nnz:end], detector.substates[end-nnz:end]
+    selected = sortperm(weights; rev=true)[1:min(length(weights), param.rank_bound)]
+    tail = setdiff(eachindex(weights), selected)
+    return detector, weights, detector.purestates[tail], detector.substates[tail]
 end
 
 """
@@ -182,12 +189,15 @@ Keep the `rank_bound` heaviest components and renormalise to a convex
 combination, so LADMM is warm-started with factorisation size at most `r`.
 """
 function selectTopFactors(weights, rank_bound::Int, arrays...)
-    sorted_weights = sort(weights, rev = true)
+    all(a -> length(a) == length(weights), arrays) ||
+        throw(DimensionMismatch("Factor arrays and weights must have the same length"))
+    isempty(weights) && throw(ArgumentError("LADMM requires a nonempty factorisation"))
     sorted_indices = sortperm(weights, rev = true)
-    nfactor = min(length(sorted_weights), rank_bound)
-    w = sorted_weights[1:nfactor]
+    nfactor = min(length(weights), rank_bound)
+    selected = sorted_indices[1:nfactor]
+    w = weights[selected]
     w ./= sum(w)
-    return (w, map(a -> a[sorted_indices][1:nfactor], arrays)...)
+    return (w, map(a -> a[selected], arrays)...)
 end
 
 """
@@ -201,6 +211,26 @@ function activeFactors(purestates, substates, weights; tol = 1e-7)
 end
 
 """
+    addConjugateStates!(detector, addtoPool = false)
+
+Supplement product states with their entrywise conjugates. For real targets,
+this lets the master represent the real separable mixture `(P + conj(P))/2`
+exactly, instead of compensating imaginary residuals with unrelated columns.
+Every added state is a product state on the same subsystems.
+"""
+function addConjugateStates!(detector, addtoPool = false)
+    purestates, substates = [], []
+    for i in eachindex(detector.purestates)
+        state = detector.purestates[i]
+        any(!iszero, imag(state)) || continue
+        push!(purestates, conj.(state))
+        push!(substates, [conj.(v) for v in detector.substates[i]])
+    end
+    addBatchStates(detector, purestates, substates, addtoPool)
+    return length(purestates)
+end
+
+"""
     flipMultipliers!(multipliers)
 
 The LMO and the lifted solver use opposite sign conventions for the dual
@@ -210,6 +240,31 @@ function flipMultipliers!(multipliers)
     multipliers[:RE] = -multipliers[:RE]
     multipliers[:IM] = -multipliers[:IM]
     return multipliers
+end
+
+"Construct a consistent lifted warm start after support filtering and rank trimming."
+function irWarmStart(purestates, substates, weights, rank_bound, H, ub, multipliers, param)
+    w, sub, pure = selectTopFactors(weights, rank_bound, substates, purestates)
+    z = 1 - ub
+    if param.ir_refit_scalar
+        D = size(H, 1)
+        mixed = Matrix{ComplexF64}(I, D, D) / D
+        B = H - mixed
+        Y = sum(w[a] * pure[a] for a in eachindex(w))
+        denom = real(dot(B, B))
+        denom > eps(Float64) && (z = clamp(real(dot(B, Y - mixed)) / denom, 0.0, 1.0))
+    end
+    return w, sub, z, multipliers
+end
+
+"Continue the lifted iterate when CP returned only its older certificate."
+function irNextSeed(snapshot, previous_snapshot, cp_solution, lifted_solution)
+    if snapshot === previous_snapshot
+        return lifted_solution
+    end
+    pure, sub, weights, upper = cp_solution
+    pure, sub, weights = activeFactors(pure, sub, weights)
+    return pure, sub, weights, upper
 end
 
 """
@@ -226,32 +281,63 @@ function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, 
     multipliers = Dict(:RE => zeros(dimH, dimH), :IM => zeros(dimH, dimH))
 
     ub = 0.5
-    glbub, glblb = Inf, -Inf
+    seed_upper = ub
+    glbub, glblb = 1.0, 0.0
     approxub, approxfeas, approxweights = 1.0, 0.0, 0.0
 
+    remainingTime(param) <= 0 && return glbub, glblb, 1.0, 0.0, 1.0
+
     detector, weights, nz_purestates, nz_substates = initialActiveSet(HR, HI, dims, param)
+    seed_purestates, seed_substates = detector.purestates, detector.substates
+    H = HR + im * HI
+    snapshot_state = Ref{Union{Nothing,MasterSnapshot}}(nothing)
 
     for i in 1:maxi
         println("Lifting-discretization iteration: $i / $(param.loop)")
         detector.round = 2 * i - 1
-        weights, substates = selectTopFactors(weights, param.rank_bound, detector.substates)
+        weights, substates, z, multipliers = irWarmStart(seed_purestates,
+            seed_substates, weights, param.rank_bound, H, seed_upper, multipliers, param)
 
+        candidates = (pure=Any[], sub=Any[])
+        candidate_offset = isnothing(snapshot_state[]) ? -Inf : snapshot_state[].offset
         # LADMM on the lifted problem (paper Alg. LADMM)
-        purestates, substates, approxub, approxfeas =
-            ladmmSolve(detector, dims, HR + im * HI, substates, weights, 1 - ub, multipliers, param, i == 1, singlerun)
+        purestates, substates, approxub, approxfeas, lifted_weights =
+            ladmmSolve(detector, dims, H, substates, weights, z, multipliers, param, i == 1, singlerun;
+                candidate_pool=candidates, candidate_offset=candidate_offset)
+        lifted_solution = (purestates, substates, lifted_weights, approxub)
 
         clearStates(detector, clearall)
         addBatchStates(detector, purestates, substates, param.lazification)
+        addBatchStates(detector, candidates.pure, candidates.sub, param.lazification)
         addBatchStates(detector, nz_purestates, nz_substates, false)
 
         # Cutting-plane master (paper Alg. CP)
         detector.round = 2 * i
-        ub, lb, terminate, purestates, substates, weights, multipliers, weights_sum =
-            cuttingPlane(detector, separateproblem, param, 1, singlerun)
+        if param.heur_LADMM_conjugates && !param.cp_real_master && all(iszero, HI)
+            addConjugateStates!(detector, param.lazification)
+        end
+        saved_maxrounds = param.maxrounds
+        previous_snapshot = snapshot_state[]
+        local lb, terminate, weights_sum
+        if param.cp_rounds_per_ir > 0 && !singlerun
+            param.maxrounds = saved_maxrounds < 0 ? param.cp_rounds_per_ir :
+                min(saved_maxrounds, param.cp_rounds_per_ir)
+        end
+        try
+            ub, lb, terminate, purestates, substates, weights, multipliers, weights_sum =
+                cuttingPlane(detector, separateproblem, param, 1, singlerun;
+                    lower_bound=glblb, snapshot_state=snapshot_state)
+        finally
+            param.maxrounds = saved_maxrounds
+        end
         glbub = min(glbub, ub)
         glblb = max(glblb, lb)
 
-        nz_purestates, nz_substates, weights = activeFactors(purestates, substates, weights)
+        # Keep the certified CP support in the next master, while a failed
+        # crossover must not erase progress made by the nonconvex solver.
+        nz_purestates, nz_substates, _ = activeFactors(purestates, substates, weights)
+        seed_purestates, seed_substates, weights, seed_upper = irNextSeed(snapshot_state[],
+            previous_snapshot, (purestates, substates, weights, ub), lifted_solution)
         approxweights = weights_sum
         flipMultipliers!(multipliers)
 
@@ -345,10 +431,12 @@ function solveAltSDPCP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{In
 
     detector, weights, nz_purestates, nz_substates = initialActiveSet(HR, HI, dims, param)
 
+    seed_purestates, seed_substates = detector.purestates, detector.substates
+
     for i in 1:maxi
         println("Lifting-discretization iteration: $i / $(param.loop)")
         weights, substates, purestates =
-            selectTopFactors(weights, param.rank_bound, detector.substates, detector.purestates)
+            selectTopFactors(weights, param.rank_bound, seed_substates, seed_purestates)
 
         ub, purestates, substates = altSDPSolve(dims, HR + im * HI, purestates, substates, weights, param, i == 1)
         glbub = min(glbub, ub)
@@ -363,6 +451,7 @@ function solveAltSDPCP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{In
         glblb = max(glblb, lb)
 
         nz_purestates, nz_substates, weights = activeFactors(purestates, substates, weights)
+        seed_purestates, seed_substates = nz_purestates, nz_substates
         approxweights = weights_sum
         flipMultipliers!(multipliers)
 

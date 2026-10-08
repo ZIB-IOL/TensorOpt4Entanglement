@@ -87,6 +87,27 @@ elif any('PDGR.solve' in arg for arg in sys.argv):
         self.assertEqual(output.count("  MISSING "), 7)
         self.assertIn("  MISSING state_0.jl PDGR", output)
 
+    def test_local_ir_forwards_manopt_and_ladmm_options(self):
+        options = ["--heur-manopt-maxiter", "40",
+                   "--heur-ladmm-maxiter", "40", "--heur-ladmm1-maxiter", "40",
+                   "--heur-ladmm-penalty-update", "balance",
+                   "--heur-ladmm-conjugates", "true",
+                   "--cp-real-master", "true", "--cp-rounds-per-ir", "3",
+                   "--cp-certify-every", "4", "--ir-refit-scalar", "true",
+                   "--maxnnodes", "7", "--maxeffortnnodes", "15",
+                   "--heur-sbb-restarts", "4", "--heur-sbb-maxiter", "200",
+                   "--heur-sbb-node-restarts", "10"]
+        self.run_script("runjobs.sh", "--local", "main", "--algo", "IR",
+                        "--state", "state_13.jl", "-t", "5", *options)
+        job = next(call for call in self.recorded_calls() if "scripts/run_experiment.jl" in call)
+        self.assertEqual(job[-len(options):], options)
+        self.run_script("scripts/exp_main.sh", "--slurm", "--algo", "IR",
+                        "--state", "state_13.jl", "-t", "5", *options)
+        job_list = self.root / "joblists/main-test.txt"
+        self.assertEqual(job_list.read_text().split()[4:], options)
+        self.run_script("run.slurm", "1", env=dict(self.env, JOB_LIST=str(job_list)))
+        self.assertEqual(self.recorded_calls()[-1][-len(options):], options)
+
     def test_slurm_worker_preserves_options_and_accepts_old_job_lists(self):
         options = ["--seed", "9", "--pdgr-fw-epsilon", "1e-8",
                    "--pdgr-witness-max-length", "100000"]

@@ -60,6 +60,17 @@ const SIZE_PRESETS = Dict(
           maxnnodes = 0),
 )
 
+# Short CP passes give LADMM repeated opportunities to move all factors;
+# residual balancing avoids resetting the penalty to either extreme. Keep the
+# paper's ranks, time budgets and oracle node limits unchanged.
+const IR_PRESETS = (
+    heur_MANOPT_maxiter = 40, heur_MANOPT1_maxiter = 40,
+    heur_LADMM_maxiter = 40, heur_LADMM1_maxiter = 40,
+    heur_LADMM_penalty_update = :balance,
+    cp_real_master = true, cp_rounds_per_ir = 4,
+    cp_certify_every = 4, ir_refit_scalar = true,
+)
+
 """
 Factorisation size r selected by the `LADMM_<r>` codes (the m = 5 rank sweep of
 the paper's low-rank table).
@@ -70,7 +81,9 @@ const RANK_SWEEP = Dict("LADMM_$r" => r for r in (400, 500, 600, 700, 800, 900))
     applySizePreset!(param, nsubs, algo)
 
 Apply the preset for `nsubs` subsystems in place. `maxrounds` tracks the
-factorisation size (the CP iteration limit inside IR is set to r).
+factorisation size. Four- and five-subsystem IR uses short intermediate CP
+passes and more frequent, cheaper LADMM calls; the final CP phase keeps its
+full gap-closing budget. Explicit CLI controls override these settings.
 """
 function applySizePreset!(param::Param, nsubs::Int, algo::String)
     algo = resolveAlgorithm(algo)   # so a legacy code still selects its r
@@ -94,6 +107,54 @@ function applySizePreset!(param::Param, nsubs::Int, algo::String)
         r = nsubs == 5 ? get(RANK_SWEEP, algo, param.rank_bound) : param.rank_bound
         param.rank_bound = r
         param.maxrounds = r
+    end
+    if nsubs in (4, 5) && algo in ("IR", "IR-nolazy", "IR-clear", "IR-DDPS")
+        for (field, value) in pairs(IR_PRESETS)
+            setfield!(param, field, value)
+        end
+    end
+    return param
+end
+
+"""Apply explicit heuristic and sBB limits after the size preset."""
+function applyHeuristicOverrides!(param::Param, args)
+    for (key, fields) in (
+        ("heur-manopt-maxiter", (:heur_MANOPT_maxiter, :heur_MANOPT1_maxiter)),
+        ("heur-ladmm-maxiter", (:heur_LADMM_maxiter,)),
+        ("heur-ladmm1-maxiter", (:heur_LADMM1_maxiter,)),
+        ("heur-sbb-maxiter", (:heur_sbb_maxiter,)),
+        ("heur-sbb-restarts", (:heur_sbb_restarts,)),
+        ("heur-sbb-node-restarts", (:heur_sbb_node_restarts,)),
+    )
+        value = get(args, key, nothing)
+        isnothing(value) && continue
+        value > 0 || throw(ArgumentError("--$key must be positive"))
+        for field in fields
+            setfield!(param, field, value)
+        end
+    end
+    for (key, field) in (("maxnnodes", :maxnnodes), ("maxeffortnnodes", :maxeffortnnodes))
+        value = get(args, key, nothing)
+        isnothing(value) && continue
+        value >= 0 || throw(ArgumentError("--$key must be nonnegative"))
+        setfield!(param, field, value)
+    end
+    for (key, field) in (("heur-ladmm-penalty-update", :heur_LADMM_penalty_update),
+                         ("cp-real-master", :cp_real_master),
+                         ("cp-rounds-per-ir", :cp_rounds_per_ir),
+                         ("cp-certify-every", :cp_certify_every),
+                         ("ir-refit-scalar", :ir_refit_scalar))
+        value = get(args, key, nothing)
+        isnothing(value) && continue
+        if field === :heur_LADMM_penalty_update
+            value = Symbol(value)
+            value in (:legacy, :balance) || throw(ArgumentError("--$key must be legacy or balance"))
+        elseif field === :cp_rounds_per_ir
+            (value == -1 || value > 0) || throw(ArgumentError("--$key must be -1 or positive"))
+        elseif field === :cp_certify_every
+            value >= 0 || throw(ArgumentError("--$key must be nonnegative"))
+        end
+        setfield!(param, field, value)
     end
     return param
 end
@@ -236,12 +297,9 @@ function runEntangle(args)
         solver = "MSK",
         time_limit = args["time-limit"],
         log_level = args["log-level"],
-        maxnnodes = args["maxnnodes"],
         minnnodes = args["minnnodes"],
         maxrounds = args["maxrounds"],
-        heur_LADMM1_maxiter = args["heur-ladmm1-maxiter"],
-        heur_LADMM_maxiter = args["heur-ladmm-maxiter"],
-        heur_MANOPT_maxiter = args["heur-manopt-maxiter"],
+        heur_LADMM_conjugates = get(args, "heur-ladmm-conjugates", false),
         loop = args["loop"],
     )
 
@@ -270,6 +328,7 @@ function runEntangle(args)
 
     Random.seed!(param.seed)
     applySizePreset!(param, length(dims), algo)
+    applyHeuristicOverrides!(param, args)
 
     haskey(ALGORITHMS, algo) || error("unknown algorithm $algo; expected one of $(sort(collect(keys(ALGORITHMS))))")
 
@@ -293,6 +352,8 @@ function runEntangle(args)
     end
     glbub, glblb, approxub, approxfeas, approxweights = Inf, -Inf, Inf, 0.0, 0
     resetPhases!()
+    # The optional diagnostic model build is outside the solver's budget.
+    param.start_time = time()
     elapsed_time = @elapsed begin
         glbub, glblb, approxub, approxfeas, approxweights =
             withPhase(:total) do
@@ -319,6 +380,20 @@ function runEntangle(args)
         # provenance: what was run, and with which settings
         println(io, "relaxation: $(param.relaxation)")
         println(io, "seed: $(param.seed)")
+        println(io, "ladmm_penalty_update: $(param.heur_LADMM_penalty_update)")
+        println(io, "ladmm_conjugates: $(param.heur_LADMM_conjugates)")
+        println(io, "manopt_maxiter: $(param.heur_MANOPT_maxiter)")
+        println(io, "manopt1_maxiter: $(param.heur_MANOPT1_maxiter)")
+        println(io, "ladmm_maxiter: $(param.heur_LADMM_maxiter)")
+        println(io, "ladmm1_maxiter: $(param.heur_LADMM1_maxiter)")
+        println(io, "sbb_maxnnodes: $(param.maxnnodes)")
+        println(io, "sbb_maxeffortnnodes: $(param.maxeffortnnodes)")
+        println(io, "sbb_heur_maxiter: $(param.heur_sbb_maxiter)")
+        println(io, "sbb_heur_restarts: $(param.heur_sbb_restarts)")
+        println(io, "sbb_heur_node_restarts: $(param.heur_sbb_node_restarts)")
+        for field in (:cp_real_master, :cp_rounds_per_ir, :cp_certify_every, :ir_refit_scalar)
+            println(io, "$field: $(getfield(param, field))")
+        end
         println(io, "julia: $(VERSION)")
         println(io, "host: $(gethostname())")
         # size and memory (see Diagnostics.jl)

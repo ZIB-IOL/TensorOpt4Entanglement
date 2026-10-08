@@ -12,8 +12,10 @@
 #   <prefix>.cp.csv      iter,is_last,ub_relx,lb_relx,b_lower,n_states
 #   <prefix>.ladmm.csv   iter,zeta,f,pen,residual,grad_norm,z,alm
 #
-# In the CP trace `b_lower` is the sBB oracle's lower bound for that round, so
-# lb_relx = ub_relx + b_lower. In the LADMM trace `residual` is
+# In the CP trace `b_lower` is the pricing correction to that round's master
+# upper bound, including any objective loss from witness stabilisation.
+# `lb_relx` retains the best bound across rounds and preceding IR passes.
+# In the LADMM trace `residual` is
 # ||A(z) + a - Psi(x)||_2, the quantity that certifies ub_heur when it vanishes.
 #
 # Tracing is off unless EXACTENT_TRACE is set, and every writer is a no-op on
