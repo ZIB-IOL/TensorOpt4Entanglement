@@ -113,8 +113,11 @@ function mixBranch3(stateseparator::StateSeparator, focusnode::Node, sol)
                 for part in (:RE,:IM)
                     score = Zgapscores[Zind][part][j,k]
                     j != k && (score += Zgapscores[Zind][part][k,j])
-                    width = ZBs[Zind][part,:U][j,k] - ZBs[Zind][part,:L][j,k]
-                    if width > param.feas_tol && !haskey(focusnode.fixvars, (Zind, part, j, k)) &&
+                    lower = ZBs[Zind][part,:L][j,k]
+                    upper = ZBs[Zind][part,:U][j,k]
+                    width = upper - lower
+                    if width > param.feas_tol && nextfloat(lower) < upper &&
+                            !haskey(focusnode.fixvars, (Zind, part, j, k)) &&
                             !haskey(focusnode.fixvars, (Zind, part, k, j)) &&
                             (score > bestscore || (score == bestscore && width > bestwidth))
                         bestpart = part
@@ -149,6 +152,15 @@ end
 
 # create subnodes given a branch node
 function stateseparatorCreateBranchNodes!(stateseparator::StateSeparator, node::Node, part::Symbol, Zind::Int, i::Int, j::Int, brpoint::Float64)
+    lower = node.ZBs[Zind][part, :L][i, j]
+    upper = node.ZBs[Zind][part, :U][i, j]
+    # The relative margin can round to an endpoint on tiny intervals. Require
+    # a representable interior point before changing the tree, and include it
+    # in the clamp so every created child strictly shrinks its parent interval.
+    nextfloat(lower) < upper || return nothing
+    margin = 0.1 * (upper - lower)
+    brpoint = clamp(brpoint, max(lower + margin, nextfloat(lower)),
+        min(upper - margin, prevfloat(upper)))
     endnodeid = stateseparatorGetNNodes(stateseparator)
     delete!(stateseparator.leaves, node.nodeid)
     nodedown = Node(endnodeid + 1, node.nodeid, endnodeid + 2, node.depth + 1, true, deepcopy(node.ZBs), deepcopy(node.fixvars))
@@ -156,12 +168,6 @@ function stateseparatorCreateBranchNodes!(stateseparator::StateSeparator, node::
     # Unsolved children retain a valid bound when a shared deadline interrupts
     # the next node solve. Their parent's bound applies to both subdomains.
     nodedown.localdualbd = nodeup.localdualbd = node.localdualbd
-    lower = node.ZBs[Zind][part, :L][i, j]
-    upper = node.ZBs[Zind][part, :U][i, j]
-    # A split at a boundary leaves one child unchanged. Keep both children
-    # strictly smaller while preserving their union as the parent interval.
-    margin = 0.1 * (upper - lower)
-    brpoint = clamp(brpoint, lower + margin, upper - margin)
     tightenEntryBounds!(nodedown,Zind,part,i,j,lower,brpoint)
     tightenEntryBounds!(nodeup,Zind,part,i,j,brpoint,upper)
     stateseparatorAddNode!(stateseparator, nodedown)

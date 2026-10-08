@@ -15,6 +15,11 @@ using Test, LinearAlgebra, Serialization
     end
 
     rho = ComplexF64[1 0 0 1; 0 0 0 0; 0 0 0 0; 1 0 0 1] / 2
+    expired = Param(time_limit=60.0,start_time=time()-61,log_level=0,pdgr=options)
+    exhausted = solvePDGR(rho,[2,2],expired)
+    @test exhausted.status == "time_limit"
+    @test exhausted.config.time_limit == 0.0
+    @test exhausted.ent_bound == 0 && exhausted.sep_bound == 1
     result = solvePDGR(rho, [2, 2], param; time_limit=Inf, seed=0)
     @test result.ent_bound > 0
     @test result.ent_bound <= 2/3 <= result.sep_bound

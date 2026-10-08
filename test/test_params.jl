@@ -20,6 +20,10 @@ const E = ExactEntanglement
         # an explicit positive time limit is respected
         q = Param(time_limit = 42.0); E.applySizePreset!(q, 3, "LD1")
         @test q.time_limit == 42.0
+        q6 = Param(time_limit = 42.0); E.applySizePreset!(q6, 6, "IR")
+        @test q6.time_limit == 42.0
+        q6default = Param(time_limit = -1.0); E.applySizePreset!(q6default, 6, "IR")
+        @test q6default.time_limit == 10800.0
         # the rank sweep applies only at m == 5
         q5 = Param(time_limit = -1.0); E.applySizePreset!(q5, 5, "LADMM_700")
         @test q5.rank_bound == 700
@@ -113,6 +117,100 @@ const E = ExactEntanglement
         @test q.time_limit == 100.0
         @test 0 < E.remainingTime(q) < 2
         @test !E.isTimeLimitNearlyReached(q)     # only fires once
+    end
+
+    @testset "IR respects the requested lazy pool capacity" begin
+        H = Matrix(E.LinearAlgebra.Diagonal([0.4,0.3,0.2,0.1]))
+        for capacity in (-1,0,17,Param().pool_size)
+            q = Param(time_limit=0.0,pool_size=capacity,log_level=0)
+            result = E.ALGORITHMS["IR"](H,zeros(4,4),[2,2],q)
+            @test q.lazification
+            @test q.pool_size == capacity
+            @test result == (1.0,0.0,1.0,0.0,1.0)
+        end
+    end
+end
+
+@testset "Lazy pool keys preserve real columns without copying them" begin
+    H=zeros(4,4)
+    detector=E.ThresholdEntanglementDetector(H,H,[2,2],[],[])
+    x=ComplexF64[1,im]/sqrt(2)
+    P=kron(x*x',x*x')
+    for realmaster in (false,true), state in (P,real(P),ComplexF32.(P),view(P,:,:))
+        detector.realmaster=realmaster
+        expected=realmaster ? real(state) : state
+        key=E.poolKey(detector,state)
+        @test isequal(key,expected)
+        @test hash(key)==hash(expected)
+        @test get(Dict(expected=>7),key,0)==7
+        !realmaster && @test key === state
+    end
+    detector.realmaster=true
+    key=E.poolKey(detector,P)
+    @test key isa SubArray
+    @test Base.mightalias(key,P)
+    @test isequal(key,E.poolKey(detector,conj.(P)))
+    # This is also the production deduplication rule for conjugate columns.
+    detector.poolpurestates=[P,conj.(P)]
+    detector.poolsubstates=[[x,x],[conj.(x),conj.(x)]]
+    detector.poolstats=[1,3]
+    E.compactPool!(detector,Param(pool_size=2))
+    @test detector.poolstats==[3]
+end
+
+@testset "Alternating SDP handles missing results and Farkas duals" begin
+    blocks=Dict(:RE=>Any[],:IM=>Any[])
+    for status in (MOI.TIME_LIMIT,MOI.INFEASIBLE)
+        mock=MOI.Utilities.MockOptimizer(MOI.Utilities.Model{Float64}())
+        model=direct_model(mock)
+        @variable(model,z)
+        @objective(model,Max,z)
+        alternate=E.AltSDPModel(model,blocks,blocks,z,blocks)
+        @test E.solveAlternate(alternate,Param(time_limit=0.0)) ==
+            (E.RelaxNoSolution,MOI.TIME_LIMIT,nothing)
+        @test termination_status(model)==MOI.OPTIMIZE_NOT_CALLED
+        MOI.Utilities.mock_optimize!(mock,status)
+        result=E.alternateResult(alternate)
+        @test result[1]==(status==MOI.INFEASIBLE ? E.RelaxInfeasible : E.RelaxNoSolution)
+        @test result[2]==status && isnothing(result[3])
+    end
+    mock=MOI.Utilities.MockOptimizer(MOI.Utilities.Model{Float64}())
+    model=direct_model(mock)
+    @variable(model,z)
+    @objective(model,Max,z)
+    c=@constraint(model,z<=0)
+    cons=Dict(:RE=>Any[[c]],:IM=>Any[])
+    alternate=E.AltSDPModel(model,blocks,blocks,z,cons)
+    MOI.Utilities.mock_optimize!(mock,MOI.INFEASIBLE,MOI.NO_SOLUTION,
+        MOI.INFEASIBILITY_CERTIFICATE,
+        (MOI.ScalarAffineFunction{Float64},MOI.LessThan{Float64})=>[-1.0])
+    result=E.alternateResult(alternate)
+    @test result[1]==E.RelaxInfeasibleCertificate
+    @test result[3].Xdual[:RE]==[[-1.0]]
+    @test isnan(result[3].primalobj) && isnan(result[3].dualobj)
+end
+
+@testset "DPS uses the remaining shared budget" begin
+    H=zeros(8,8);H[1,1]=1
+    @test E.solveDPS(H,zeros(8,8),[2,2,2],Param(time_limit=0.0))==0.0
+    # Compile the optimizer constructor before inspecting a short budget.
+    E.dpsOptimizer(Param(time_limit=-1.0))
+    param=Param(time_limit=60.0,start_time=time()-57)
+    optimizer=E.dpsOptimizer(param)
+    @test 0 < MOI.get(optimizer,MOI.TimeLimitSec()) <= 3.0
+    param.start_time=time()-61
+    @test MOI.get(E.dpsOptimizer(param),MOI.TimeLimitSec())==0.0
+    param.time_limit=-1.0
+    @test isnothing(MOI.get(E.dpsOptimizer(param),MOI.TimeLimitSec()))
+end
+
+@testset "CP revalidates mutable bound tolerances" begin
+    H=zeros(4,4);H[1,1]=1
+    for field in (:obj_tol,:master_obj_tol,:tol,:feas_tol)
+        param=Param(time_limit=0.0)
+        setproperty!(param,field,-0.1)
+        detector=E.ThresholdEntanglementDetector(H,zeros(4,4),[2,2],[],[])
+        @test_throws ArgumentError E.cuttingPlane(detector,E.Problem(H,zeros(4,4),[2,2]),param)
     end
 end
 

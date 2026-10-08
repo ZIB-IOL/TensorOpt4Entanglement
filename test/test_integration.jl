@@ -333,6 +333,63 @@ else
                 @test second[1] <= first[1]+p.master_obj_tol
             end
 
+            @testset "Lazy columns survive CP returns and are restored in a later phase" begin
+                psi = ComplexF64[1,0,0,1]/sqrt(2); H = psi*psi'
+                zero = ComplexF64[1,0]; one = ComplexF64[0,1]
+                plus = (zero+one)/sqrt(2)
+                oldsub, newsub = [plus,plus], [one,plus]
+                oldpure = foldl(kron,[v*v' for v in oldsub])
+                newpure = foldl(kron,[v*v' for v in newsub])
+                p = Param(time_limit=60.0,log_level=0,lazification=true,
+                    pool_size=2,pointsize_bound=4,rank_bound=4)
+                detector,_,_,_ = E.initialActiveSet(real(H),imag(H),[2,2],p)
+                detector.round = 1
+                E.addBatchStates(detector,[oldpure],[oldsub],true)
+                detector.round = 2
+                E.cuttingPlane(detector,E.Problem(real(H),imag(H),[2,2]),p,0,true)
+                @test detector.poolstats == [1]
+                @test length(detector.purestates) == 5
+
+                E.clearStates(detector)
+                @test !any(state -> state == oldpure,detector.purestates)
+                detector.round = 3
+                E.addBatchStates(detector,[newpure],[newsub],true)
+                detector.round = 4
+                # Force the existing late-phase poolAdd, with a full shared
+                # budget and no timing-dependent near-deadline setup.
+                p.tratio = 1.0
+                p.start_time = time()
+                E.cuttingPlane(detector,E.Problem(real(H),imag(H),[2,2]),p,0,true)
+                @test p.is_last
+                @test length(detector.purestates) == 6
+                @test count(==(oldpure),detector.purestates) == 1
+                @test count(==(newpure),detector.purestates) == 1
+                @test detector.poolstats == [1,3]
+                @test all(P ≈ foldl(kron,[v*v' for v in S])
+                    for (P,S) in zip(detector.poolpurestates,detector.poolsubstates))
+            end
+
+            @testset "Lazy pool capacity keeps the latest unique product columns" begin
+                zero = ComplexF64[1,0]; one = ComplexF64[0,1]
+                plus = (zero+one)/sqrt(2); yp = (zero+im*one)/sqrt(2)
+                sub = [[plus,plus],[yp,zero],[conj.(yp),zero],[yp,zero]]
+                pure = [foldl(kron,[v*v' for v in S]) for S in sub]
+                for realmaster in (false,true), capacity in (-1,0,1,2)
+                    detector = E.ThresholdEntanglementDetector(zeros(4,4),zeros(4,4),[2,2],[],[])
+                    detector.realmaster = realmaster
+                    detector.poolpurestates = copy(pure)
+                    detector.poolsubstates = copy(sub)
+                    detector.poolstats = collect(1:4)
+                    expected = realmaster ? [1,4] : [1,3,4]
+                    capacity >= 0 && (expected = expected[end-min(capacity,length(expected))+1:end])
+                    E.compactPool!(detector,Param(pool_size=capacity))
+                    @test detector.poolstats == expected
+                    @test length(detector.poolpurestates) == length(detector.poolsubstates) == length(expected)
+                    @test all(detector.poolpurestates[a] === pure[index] &&
+                        detector.poolsubstates[a] === sub[index] for (a,index) in enumerate(expected))
+                end
+            end
+
             @testset "Final CP stabilization preserves gap closing" begin
                 psi = ComplexF64[1,0,0,1]/sqrt(2); H = psi*psi'
                 zero = ComplexF64[1,0]; one = ComplexF64[0,1]

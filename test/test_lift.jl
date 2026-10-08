@@ -214,6 +214,89 @@ end
     @test search.stop_when_stepsize_less == 1e-10
 end
 
+@testset "LADMM Wolfe search enforces descent and its deadline" begin
+    M = E.Manifolds.Euclidean(1)
+    search_for(p) = E.Manopt.WolfePowellLinesearchStepsize(M;p=copy(p),X=zeros(1),
+        max_stepsize=0.1,stop_when_stepsize_less=1e-10)
+    # With ||direction|| > 1e8 the initial scalar step lies below Wolfe's
+    # absolute backtracking cutoff. Its returned trial can increase the cost
+    # or lie outside a finite-cost domain; both need actual backtracking.
+    for curvature in (1e11, 1e15), finite_domain in (false, true)
+        p = [0.01]
+        cost = (M,q) -> finite_domain && q[1] <= 0 ? NaN : curvature*q[1]^2/2
+        gradient = (M,q) -> [curvature*q[1]]
+        problem = E.Manopt.DefaultManoptProblem(M,
+            E.Manopt.ManifoldGradientObjective(cost,gradient))
+        search = search_for(p)
+        guard = E.LADMMWolfeGuard(search)
+        state = E.Manopt.QuasiNewtonState(M;p=copy(p),X=gradient(M,p),stepsize=guard)
+        direction = -gradient(M,p)
+        step = guard(problem,state,1,direction)
+        trial = p + step*direction
+        @test isfinite(step) && step > 0
+        @test isfinite(cost(M,trial))
+        @test cost(M,trial) < cost(M,p)
+        @test cost(M,trial) <= cost(M,p) +
+            search.sufficient_decrease*step*dot(gradient(M,p),direction)
+        @test E.Manopt.get_last_stepsize(guard) == step
+        @test state.p == p
+    end
+
+    # A normal Wolfe step remains unchanged, including a small direction.
+    for p in ([1.0], [1e-8])
+        cost = (M,q) -> q[1]^2/2
+        gradient = (M,q) -> copy(q)
+        problem = E.Manopt.DefaultManoptProblem(M,
+            E.Manopt.ManifoldGradientObjective(cost,gradient))
+        raw = search_for(p)
+        guard = E.LADMMWolfeGuard(search_for(p),time()+120)
+        state = E.Manopt.QuasiNewtonState(M;p=copy(p),X=gradient(M,p),stepsize=guard)
+        direction = -gradient(M,p)
+        expected = raw(problem,state,1,direction)
+        @test guard(problem,state,1,direction) == expected
+        @test E.Manopt.get_last_stepsize(guard) == expected
+    end
+
+    # An expired search returns no step, without evaluating the objective.
+    p = [0.01]
+    evaluations = Ref(0)
+    cost = (M,q) -> (evaluations[] += 1; q[1]^2/2)
+    gradient = (M,q) -> copy(q)
+    problem = E.Manopt.DefaultManoptProblem(M,
+        E.Manopt.ManifoldGradientObjective(cost,gradient))
+    guard = E.LADMMWolfeGuard(search_for(p),time()-1)
+    state = E.Manopt.QuasiNewtonState(M;p=copy(p),X=gradient(M,p),stepsize=guard)
+    @test guard(problem,state,1,-p) == 0.0
+    @test E.Manopt.get_last_stepsize(guard) == 0.0
+    @test evaluations[] == 0
+    @test state.p == p
+
+    # Stop inside Wolfe when a cost call exhausts the budget, instead of
+    # waiting for the whole bracket search. Preserve the accepted solver point.
+    deadline = Ref(time()+120)
+    wait_for_deadline = Ref(false)
+    slow_cost = (M,q) -> begin
+        evaluations[] += 1
+        wait_for_deadline[] && evaluations[] == 2 &&
+            sleep(max(0.0,deadline[]-time())+0.01)
+        q[1]^2/2
+    end
+    problem = E.Manopt.DefaultManoptProblem(M,
+        E.Manopt.ManifoldGradientObjective(slow_cost,gradient))
+    # Compile this callback path before starting its short time budget.
+    guard = E.LADMMWolfeGuard(search_for(p),deadline[])
+    state = E.Manopt.QuasiNewtonState(M;p=copy(p),X=gradient(M,p),stepsize=guard)
+    @test guard(problem,state,1,-p) > 0
+    deadline[] = time()+0.5
+    evaluations[] = 0
+    wait_for_deadline[] = true
+    guard = E.LADMMWolfeGuard(search_for(p),deadline[])
+    @test guard(problem,state,1,-p) == 0.0
+    @test E.Manopt.get_last_stepsize(guard) == 0.0
+    @test evaluations[] == 2
+    @test state.p == p
+end
+
 @testset "LADMM controls" begin
     limits = Param(heur_LADMM1_maxiter=8,heur_LADMM_maxiter=4,
         heur_MANOPT1_maxiter=200,heur_MANOPT_maxiter=150)

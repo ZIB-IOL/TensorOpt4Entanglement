@@ -186,6 +186,7 @@ end
 function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, param::Param,
                        effortlevel = 0, singlerun = false;
                        lower_bound = 0.0, snapshot_state = nothing, pricing_pool = nothing)
+    validateBoundTolerances(param)
     snapshot = isnothing(snapshot_state) || isnothing(snapshot_state[]) ?
         mixedMasterSnapshot(detector) : snapshot_state[]
     lower, terminate = max(0.0, lower_bound), false
@@ -275,9 +276,10 @@ function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, 
     finally
         traceClose!(trace)
         if param.lazification
-            empty!(detector.poolpurestates)
-            empty!(detector.poolsubstates)
-            empty!(detector.poolstats)
+            # Inactive columns are eligible in later IR rounds. Preserve the
+            # pool across passes, with duplicate columns and capacity managed
+            # independently of the current master and its certificate support.
+            compactPool!(detector, param)
         end
     end
     if has_current && !isnothing(snapshot_state) && !singlerun && !terminate &&

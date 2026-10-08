@@ -468,6 +468,12 @@ function solveAltSDP(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int6
     return ub, -Inf64, ub, 0.0
 end
 
+function dpsOptimizer(param::Param)
+    optimizer = Ket.Hypatia.Optimizer{Float64}()
+    MOI.set(optimizer, MOI.TimeLimitSec(), param.time_limit < 0 ? Inf : remainingTime(param))
+    return optimizer
+end
+
 """
     solveDPS(HR, HI, dims, param)
 
@@ -475,6 +481,7 @@ DPS hierarchy lower bound via `Ket.entanglement_robustness`. The bipartition and
 level follow the paper's DPS configuration per subsystem count.
 """
 function solveDPS(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, param::Param)
+    param.time_limit >= 0 && remainingTime(param) <= 0 && return 0.0
     ρ = HR + im * HI
     dimH = reduce(*, dims)
     config = Dict([2, 2, 2] => ([4, 2], 6),
@@ -482,8 +489,19 @@ function solveDPS(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64},
                   [2, 2, 2, 2, 2] => ([8, 4], 1))
     haskey(config, dims) || error("no DPS configuration for dims = $dims")
     bipartition, level = config[dims]
-    val, _ = Ket.entanglement_robustness(Matrix(ρ), bipartition, level;
-                                         noise = "white", ppt = true, inner = false, verbose = true)
+    # Ket instantiates this optimizer after constructing the SDP, so model
+    # setup consumes the same budget as the solve. Preserve its Hypatia solver.
+    val = try
+        value, _ = Ket.entanglement_robustness(Matrix(ρ), bipartition, level;
+            noise="white", ppt=true, inner=false, verbose=true,
+            solver=() -> dpsOptimizer(param))
+        value
+    catch err
+        # Ket reports an unsolved model via Hypatia's raw status. A time-limited
+        # primal objective is not a lower certificate; retain the physical zero.
+        err isa ErrorException && err.msg == "TimeLimit" && return 0.0
+        rethrow()
+    end
     # Ket minimises λ subject to ρ + λ·Id lying in the DPS cone, with the
     # UNNORMALISED identity, so that matrix has trace 1 + λ·dimH. Normalising,
     #   (ρ + λ Id)/(1 + λ d) = (1/(1+λd))·ρ + (λd/(1+λd))·(Id/d),

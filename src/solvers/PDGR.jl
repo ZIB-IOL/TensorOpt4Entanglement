@@ -11,7 +11,7 @@ result, including witnesses and history. No conic solver is invoked.
 """
 function solvePDGR(rho::Union{AbstractMatrix,AbstractVector}, dims,
                    param::Param=Param(); options::PDGROptions=param.pdgr, kwargs...)
-    shared = (time_limit = param.time_limit < 0 ? Inf : param.time_limit,
+    shared = (time_limit = param.time_limit < 0 ? Inf : remainingTime(param),
               seed = param.seed, verbose = param.log_level)
     return PDGR.solve(rho, dims; options, merge(shared, (; kwargs...))...)
 end

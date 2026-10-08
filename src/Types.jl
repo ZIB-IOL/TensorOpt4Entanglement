@@ -174,7 +174,7 @@ mutable struct Param
       heur_sbb_maxiter > 0 || throw(ArgumentError("sBB heuristic iterations must be positive"))
       heur_sbb_restarts > 0 || throw(ArgumentError("sBB heuristic restarts must be positive"))
       heur_sbb_node_restarts > 0 || throw(ArgumentError("sBB node heuristic restarts must be positive"))
-      new(solver, time_limit, obj_tol, master_obj_tol, tol, feas_tol, log_level,
+      param = new(solver, time_limit, obj_tol, master_obj_tol, tol, feas_tol, log_level,
           thread, maxnnodes, maxeffortnnodes, minnnodes, heur_sbb_maxiter,
           heur_sbb_restarts, heur_sbb_node_restarts, maxrounds, seed,
           heur_LADMM1_maxiter, heur_LADMM_maxiter, heur_LADMM_obj_tol,
@@ -186,7 +186,19 @@ mutable struct Param
           loop, start_time, is_last, tratio, lazification, pool_size,
           pointsize_bound, rank_bound, cp_real_master, cp_rounds_per_ir,
           cp_certify_every, ir_refit_scalar, pdgr)
+      validateBoundTolerances(param)
+      return param
    end
+end
+
+"Reject invalid tolerances before they can restrict a domain or certify a bound."
+function validateBoundTolerances(param::Param)
+   for name in (:obj_tol,:master_obj_tol,:tol,:feas_tol)
+      value = getfield(param,name)
+      isfinite(value) && value >= 0 ||
+         throw(ArgumentError("$name must be finite and nonnegative"))
+   end
+   return nothing
 end
 
 """

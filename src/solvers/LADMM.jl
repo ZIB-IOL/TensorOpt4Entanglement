@@ -77,18 +77,74 @@ end
 
 struct LADMMWolfeGuard{S<:Manopt.Stepsize} <: Manopt.Stepsize
     search::S
+    deadline::Float64
 end
+
+LADMMWolfeGuard(search) = LADMMWolfeGuard(search, Inf)
+
+struct LADMMLineSearchDeadline <: Exception end
 
 function (guard::LADMMWolfeGuard)(problem, state, iteration,
         direction=-Manopt.get_gradient(problem, Manopt.get_iterate(state)); kwargs...)
     M = Manopt.get_manifold(problem)
     p = Manopt.get_iterate(state)
+    guard.search.last_stepsize = 0.0
+    time() >= guard.deadline && return 0.0
     cap = min(1e9, guard.search.max_stepsize / norm(M, p, direction))
     # Wolfe doubles its bracket at most past cap, so its endpoints are below
     # 2cap. An ulp-scaled tolerance prevents rounded-midpoint stagnation;
     # its added uncertainty in displacement is at most 8eps(Float64)*0.1.
     guard.search.stop_when_stepsize_less = max(1e-10, 8eps(cap))
-    return guard.search(problem, state, iteration, direction; kwargs...)
+    # The outer stopping criterion is checked only between Manopt iterations.
+    # Check the same deadline before each cost/gradient evaluation in Wolfe.
+    search_problem = if isfinite(guard.deadline)
+        cost = (M, q) -> begin
+            time() >= guard.deadline && throw(LADMMLineSearchDeadline())
+            Manopt.get_cost(problem, q)
+        end
+        gradient = (M, q) -> begin
+            time() >= guard.deadline && throw(LADMMLineSearchDeadline())
+            Manopt.get_gradient(problem, q)
+        end
+        Manopt.DefaultManoptProblem(M, Manopt.ManifoldGradientObjective(cost, gradient))
+    else
+        problem
+    end
+    try
+        # Read the base cost before Wolfe, so the final trial's cached lift
+        # remains reusable when we verify the returned step.
+        f0 = Manopt.get_cost(search_problem, p)
+        # quasi_Newton already computed this gradient at its accepted point.
+        slope = real(inner(M, p, Manopt.get_gradient(state), direction))
+        if !(isfinite(f0) && isfinite(slope) && slope <= 0)
+            guard.search.last_stepsize = 0.0
+            return 0.0
+        end
+        step = guard.search(search_problem, state, iteration, direction; kwargs...)
+        # Wolfe's fixed scalar cutoff can skip Armijo backtracking for large
+        # directions. Verify its returned step and halve failed trials without
+        # an absolute scalar cutoff, until descent or numerical exhaustion.
+        while isfinite(step) && step > 0
+            ManifoldsBase.retract_fused!(M, guard.search.candidate_point, p,
+                direction, step, guard.search.retraction_method)
+            trial_cost = Manopt.get_cost(search_problem, guard.search.candidate_point)
+            if isfinite(trial_cost) &&
+                    trial_cost <= f0 + guard.search.sufficient_decrease * step * slope
+                guard.search.last_stepsize = step
+                return step
+            end
+            next_step = step / 2
+            if iszero(next_step) || all(p[j] + next_step * direction[j] == p[j]
+                    for j in eachindex(p, direction))
+                break
+            end
+            step = next_step
+        end
+    catch err
+        err isa LADMMLineSearchDeadline || rethrow()
+    end
+    guard.search.last_stepsize = 0.0
+    return 0.0
 end
 
 Manopt.get_last_stepsize(guard::LADMMWolfeGuard, args...) =
@@ -520,7 +576,7 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
         #y = liftMap(M, pX)
         #y /= tr(y)
         state = quasi_Newton(M, myf, mygrad_f, pX; debug=debuginfo, return_state=true, record=[:Iteration],
-            memory_size=20, stepsize=LADMMWolfeGuard(ladmmLineSearch(M, pX)(M)),
+            memory_size=20, stepsize=LADMMWolfeGuard(ladmmLineSearch(M, pX)(M), deadline),
             stopping_criterion=StopAfterIteration(maxmanoptiter) | StopWhenChangeLess(M, inner_step_tol) | StopWhenCostChangeLess(inner_obj_tol) | StopWhenGradientNormLess(inner_gd_tol) | LADMMDeadline(deadline),
             project! = fastProjTangent!, retraction_method = ProjectionRetraction(),
             vector_transport_method = ProjectionTransport())

@@ -18,6 +18,9 @@ mutable struct StateSeparator
    status
 
    function StateSeparator(problem::Problem, param::Param)
+      # Param is mutable; reject an invalid tolerance again before using it
+      # in objective cutoffs, pruning, or the global support-function bound.
+      validateBoundTolerances(param)
       dualbd = Inf
       primalbd = -Inf
       primaloutbd = -Inf

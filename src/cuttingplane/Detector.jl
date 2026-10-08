@@ -47,14 +47,45 @@ function addCons(detector::AbstractEntanglementDetector, state, index = length(d
     return true
 end
 
+"Read a lazy column's real key without copying its matrix; pool columns stay unchanged."
+function poolKey(detector::AbstractEntanglementDetector, state)
+    detector.realmaster || return state
+    eltype(state) <: Real && return state
+    state isa Matrix{ComplexF64} &&
+        return view(reinterpret(reshape, Float64, state), 1, :, :)
+    return real(state)
+end
+
+"Retain the latest unique lazy columns, keeping product factors and rounds aligned."
+function compactPool!(detector::AbstractEntanglementDetector, param::Param)
+    length(detector.poolpurestates) == length(detector.poolsubstates) == length(detector.poolstats) ||
+        throw(DimensionMismatch("Lazy states, factors and rounds must have the same length"))
+    selected = Int[]
+    seen = Dict{Any,Int}()
+    if param.pool_size != 0
+        for index in reverse(eachindex(detector.poolpurestates))
+            state = detector.poolpurestates[index]
+            key = poolKey(detector, state)
+            get!(seen,key,index) == index || continue
+            push!(selected,index)
+            param.pool_size >= 0 && length(selected) >= param.pool_size && break
+        end
+    end
+    reverse!(selected)
+    detector.poolpurestates = detector.poolpurestates[selected]
+    detector.poolsubstates = detector.poolsubstates[selected]
+    detector.poolstats = detector.poolstats[selected]
+    return nothing
+end
+
 function poolAdd(detector::AbstractEntanglementDetector, param::Param)
     # LADMM columns can already be active when their pool round becomes
     # eligible. Add only genuinely missing master columns, including when
     # several pool entries describe the same column.
-    active = Set((detector.realmaster ? real(state) : state) for state in detector.purestates)
+    active = Set(poolKey(detector, state) for state in detector.purestates)
     for (ind, state) in enumerate(detector.poolpurestates)
         if detector.poolstats[ind] > 0 && detector.poolstats[ind] < detector.round
-            key = detector.realmaster ? real(state) : state
+            key = poolKey(detector, state)
             key in active && continue
             push!(detector.substates, detector.poolsubstates[ind])
             push!(detector.purestates, detector.poolpurestates[ind])

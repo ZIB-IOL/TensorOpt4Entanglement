@@ -99,10 +99,9 @@ function applySizePreset!(param::Param, nsubs::Int, algo::String)
         field === :time_limit && continue
         setfield!(param, field, value)
     end
-    if haskey(preset, :time_limit)
-        # m == 6 overrode the time limit unconditionally; 3-5 only as a default.
-        param.time_limit = (nsubs == 6 || param.time_limit < 0) ? preset.time_limit : param.time_limit
-    elseif nsubs == 6
+    if haskey(preset, :time_limit) && param.time_limit < 0
+        param.time_limit = preset.time_limit
+    elseif nsubs == 6 && param.time_limit < 0
         param.time_limit = 10800.0
     end
 
@@ -222,7 +221,6 @@ const ALGORITHMS = Dict{String,Function}(
         return ub, lb, aub, afeas, 0
     end,
     "IR"      => function (HR, HI, dims, p)
-        p.pool_size = -1
         p.lazification = true
         solveIR(HR, HI, dims, p)
     end,

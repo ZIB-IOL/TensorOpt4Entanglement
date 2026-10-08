@@ -21,15 +21,34 @@ Solve one restricted SDP. Returns `(relaxstatus, solver_status, sol)`; `sol`
 carries the duals needed for pricing even when the model is infeasible.
 """
 function solveAlternate(alternatemodel, param::Param, silent = true)
+    remainingTime(param) <= 0 && return RelaxNoSolution, TIME_LIMIT, nothing
     model = alternatemodel.model
     setMosekParam(model, param)
     if param.log_level <= 2 || silent
         set_silent(model)
     end
     optimize!(model)
+    return alternateResult(alternatemodel)
+end
+
+"Read an alternating SDP's feasible solution or available infeasibility certificate."
+function alternateResult(alternatemodel)
+    model = alternatemodel.model
     status = termination_status(model)
-    primalobj = objective_value(model)
-    dualobj = dual_objective_value(model)
+    duals() = Dict(
+        :RE => [dual.(cons) for cons in alternatemodel.constensor[:RE]],
+        :IM => [dual.(cons) for cons in alternatemodel.constensor[:IM]],
+    )
+    if JuMP.dual_status(model) == INFEASIBILITY_CERTIFICATE && has_duals(model)
+        # Farkas pricing uses only these duals; an infeasible model need not
+        # have a primal objective or ordinary primal solution to query.
+        return RelaxInfeasibleCertificate, status,
+            (Xdual=duals(), dualobj=NaN, primalobj=NaN)
+    elseif status == INFEASIBLE
+        return RelaxInfeasible, status, nothing
+    end
+    primalobj = has_values(model) ? objective_value(model) : -Inf
+    dualobj = has_duals(model) ? dual_objective_value(model) : Inf
     relaxstatus = classifyStatus(objective_sense(model), status, JuMP.primal_status(model), JuMP.dual_status(model),
                                  primalobj, dualobj;
                                  obj_tol = 1e-4,
@@ -37,10 +56,6 @@ function solveAlternate(alternatemodel, param::Param, silent = true)
                                  unknown_is_nosolution = true)
     relaxstatus == RelaxOptimal && (dualobj = primalobj)
 
-    duals() = Dict(
-        :RE => [dual.(cons) for cons in alternatemodel.constensor[:RE]],
-        :IM => [dual.(cons) for cons in alternatemodel.constensor[:IM]],
-    )
     if relaxstatus == RelaxOptimal || relaxstatus == RelaxFeasible
         Xval = Dict(
             :RE => [value.(xvar) for xvar in alternatemodel.Xvars[:RE]],
@@ -52,8 +67,6 @@ function solveAlternate(alternatemodel, param::Param, silent = true)
         )
         return relaxstatus, status, (Xval = Xval, ysval = ysval, Xdual = duals(),
                                      dualobj = dualobj, primalobj = primalobj)
-    elseif relaxstatus == RelaxInfeasibleCertificate
-        return relaxstatus, status, (Xdual = duals(), dualobj = dualobj, primalobj = primalobj)
     end
     return relaxstatus, status, nothing
 end
@@ -183,6 +196,7 @@ function altSDPSolve(dims, H, purestates, substates, weights, param, firstrun = 
     prevobj = 0
     ysval = Dict(:RE => [], :IM => [])
     for i in 1:maxiter
+        remainingTime(param) <= 0 && break
         alternatemodel = restrict(Min, Mdir, Xvals, nsubs, dims, nrank1, freesyss)
         relaxstatus, status, sol = solveAlternate(alternatemodel, param, silent)
         if sol === nothing

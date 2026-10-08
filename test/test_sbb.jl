@@ -1,6 +1,46 @@
 using Test, LinearAlgebra
 const E = ExactEntanglement
 
+@testset "sBB rejects invalid bound tolerances before work" begin
+    for name in (:obj_tol,:master_obj_tol,:tol,:feas_tol), value in (-0.1,Inf,-Inf,NaN)
+        @test_throws ArgumentError Param(;Dict(name=>value)...)
+    end
+    zero = Param(obj_tol=0.0,master_obj_tol=0.0,tol=0.0,feas_tol=0.0,log_level=0)
+    @test all(iszero,(zero.obj_tol,zero.master_obj_tol,zero.tol,zero.feas_tol))
+
+    # H=I has exact support value one. A negative tolerance used to prune
+    # an exact dual/incumbent pair (1,1), then report the invalid upper 0.9.
+    problem = E.Problem(Matrix{Float64}(I,4,4),zeros(4,4),[2,2])
+    ss = E.StateSeparator(problem,zero)
+    root = E.createRootNode(problem.dims,problem.BST,problem.Zdims,0.0,[],problem.fixvars)
+    root.localdualbd = ss.primalbd = 1.0
+    E.stateseparatorAddNode!(ss,root)
+    E.stateseparatorUpdateTree!(ss)
+    @test !root.pruned && ss.dualbd == 1.0
+    for name in (:obj_tol,:master_obj_tol,:tol,:feas_tol), value in (-0.1,Inf,-Inf,NaN)
+        param = Param(time_limit=60.0,log_level=0)
+        setproperty!(param,name,value)
+        @test_throws ArgumentError E.StateSeparator(problem,param)
+        @test_throws ArgumentError E.separate!(problem,param)
+        @test_throws ArgumentError E.threshold!(problem,param)
+    end
+
+    # |++><++| is already a product state, so its true threshold is zero.
+    # A mutated negative feasibility tolerance gives radius 0.45; trace
+    # consistency would then force 0.5(1-t)<=0.45, or the false lower bound 0.1.
+    plus = [1.0,1.0]/sqrt(2)
+    localstate = plus*plus'
+    product = E.Problem(kron(localstate,localstate),zeros(4,4),[2,2])
+    param = Param(time_limit=60.0,log_level=0)
+    param.feas_tol = -0.1
+    invalid_root = E.createRootNode(product.dims,product.BST,product.Zdims,
+        param.feas_tol,[],product.fixvars)
+    radius = invalid_root.ZBs[product.Zleafids[1]][:RE,:U][1,2]
+    @test localstate[1,2] > radius
+    @test 1-radius/localstate[1,2] ≈ 0.1
+    @test_throws ArgumentError E.threshold!(product,param)
+end
+
 @testset "sBB structures" begin
     for dims in ([2, 2, 2], [2, 3, 2, 2])
         d = prod(dims)
@@ -84,6 +124,7 @@ end
         E.stateseparatorCreateBranchNodes!(ss,root,part,1,1,2,lower)
         down,up = ss.nodes[2:3]
         split = down.ZBs[1][part,:U][1,2]
+        @test split == lower + 0.1 * (upper-lower)
         @test lower < split < upper
         @test split == up.ZBs[1][part,:L][1,2]
         @test down.ZBs[1][part,:L][1,2] == lower
@@ -98,6 +139,68 @@ end
         @test all(n -> n.pruned,ss.nodes)
         @test isempty(ss.leaves)
         @test ss.dualbd >= ss.primalbd
+    end
+end
+
+@testset "sBB requires a representable interior split" begin
+    problem = E.Problem(Matrix{Float64}(I,4,4)/4,zeros(4,4),[2,2])
+    for part in (:RE,:IM), tol in (0.0,eps(0.25)/10)
+        ss = E.StateSeparator(problem,Param(feas_tol=tol,log_level=0))
+        root = E.createRootNode(problem.dims,problem.BST,problem.Zdims,tol,[],problem.fixvars)
+        offdiag = part === :RE ? 0.25 : 0.25im
+        X = ComplexF64[0.5 offdiag;conj(offdiag) 0.5]
+        other = Matrix{ComplexF64}(I,2,2)/2
+        states = [X,other,kron(X,other)]
+        values = [Dict(:RE=>real(Z),:IM=>imag(Z)) for Z in states]
+        for z in eachindex(values), p in (:RE,:IM), direction in (:L,:U)
+            root.ZBs[z][p,direction] .= values[z][p]
+        end
+        lower = 0.25
+        upper = nextfloat(lower)
+        root.ZBs[1][part,:U][1,2] = upper
+        root.ZBs[1][part,:U][2,1] = part === :RE ? upper : -lower
+        part === :IM && (root.ZBs[1][part,:L][2,1] = -upper)
+        root.localdualbd = 0.3
+        E.stateseparatorAddNode!(ss,root)
+
+        # These matrices are actual PSD product factors. The tiny interval has
+        # positive width but no Float64 interior point, even at zero tolerance.
+        @test minimum(eigvals(Hermitian(X))) > 0
+        @test upper-lower > tol
+        point,_ = E.executeBranchRules(ss,root,(;Zvals=values))
+        @test isnothing(point)
+        @test isnothing(E.stateseparatorCreateBranchNodes!(ss,root,part,1,1,2,lower))
+        @test length(ss.nodes) == 1 && ss.leaves == Set([1])
+        @test isempty(root.childs) && root.isleave
+        @test root.localdualbd == 0.3
+
+        # Two ulps have exactly one representable interior point. Both closed
+        # children must retain their endpoint and cover the whole parent box.
+        upper = nextfloat(upper)
+        root.ZBs[1][part,:U][1,2] = upper
+        if part === :RE
+            root.ZBs[1][part,:U][2,1] = upper
+        else
+            root.ZBs[1][part,:L][2,1] = -upper
+        end
+        point,_ = E.executeBranchRules(ss,root,(;Zvals=values))
+        @test !isnothing(point)
+        E.stateseparatorCreateBranchNodes!(ss,root,point[1:5]...)
+        down,up = ss.nodes[2:3]
+        split = down.ZBs[1][part,:U][1,2]
+        @test split == nextfloat(lower)
+        @test lower < split < upper
+        @test down.ZBs[1][part,:L][1,2] == lower
+        @test up.ZBs[1][part,:L][1,2] == split
+        @test up.ZBs[1][part,:U][1,2] == upper
+        for value in (lower,split,upper)
+            offdiag = part === :RE ? value : im*value
+            feasible = ComplexF64[0.5 offdiag;conj(offdiag) 0.5]
+            @test minimum(eigvals(Hermitian(feasible))) > 0
+            @test any(child -> child.ZBs[1][part,:L][1,2] <= value <=
+                child.ZBs[1][part,:U][1,2],(down,up))
+        end
+        @test down.localdualbd == up.localdualbd == 0.3
     end
 end
 
