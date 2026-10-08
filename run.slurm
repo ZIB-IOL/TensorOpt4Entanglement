@@ -2,14 +2,15 @@
 #SBATCH --job-name=sdto
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
+#SBATCH --hint=nomultithread
 # 24G, not 10G: DPS at m=3 uses level 6 and peaks at 12.9 GiB -- the smallest
 # physical instance builds the largest SDP here, and at 10G Slurm killed those
 # three jobs with no result file and nothing in the log. Alt-SDP at m=5 peaks
 # at 8.4 GiB, which left under 2 GiB of headroom for every other job.
 #SBATCH --mem=24G
 #SBATCH --time=05:58:00
-#SBATCH --partition=opt_int
-#SBATCH --constraint=Gold5222 # the paper reports Gold 5122
+#SBATCH --partition=big
+#SBATCH --constraint=Gold6342
 # Slurm's own output, kept rather than discarded: a job killed for exceeding
 # --mem or --time is reported HERE by slurmstepd and nowhere else. The Julia
 # log beside the results only has what the process itself printed, so with
@@ -34,6 +35,12 @@
 # The Julia binary is deliberately NOT in the list: it is a property of the
 # machine, not of the experiment, so set JULIA_BIN here or in the environment.
 # The optional 4th field routes results to that experiment's directory.
+
+# Match the one-CPU allocation and bind the srun task to its allocated core.
+# Explicit environment settings can override these defaults.
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-1}"
+export SLURM_CPU_BIND="${SLURM_CPU_BIND:-cores}"
 
 LINENUM="${SLURM_ARRAY_TASK_ID:-$1}"
 JOB_LIST="${JOB_LIST:-}"

@@ -43,6 +43,12 @@ export LC_ALL=C
 # Julia executable. On a cluster this is usually just "julia" from the module.
 export JULIA_BIN="${JULIA_BIN:-julia}"
 
+# Use one thread per experiment and bind Slurm tasks to allocated cores.
+# These also apply to the compute-node precompile warmup.
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-1}"
+export SLURM_CPU_BIND="${SLURM_CPU_BIND:-cores}"
+
 # MOSEK licence: a file path, or port@host for a floating licence server.
 # This is the only thing MOSEK needs from us -- Mosek.jl fetches the solver
 # itself. ~/mosek/mosek.lic wins over the default, so a laptop needs no edit.
@@ -158,12 +164,14 @@ fi
 # will actually run on, before anything is queued.
 if [[ "$MODE" == "slurm" && "${SKIP_PRECOMPILE_WARMUP:-0}" != "1" ]] && command -v srun >/dev/null 2>&1; then
     part=$(grep -oP '^#SBATCH --partition=\K\S+' run.slurm || true)
+    constraint=$(grep -oP '^#SBATCH --constraint=\K\S+' run.slurm || true)
     echo "warming the precompile cache on a '$part' node (once, so the array does not)..."
     # Pkg.precompile covers the dependency graph; the `using` additionally
     # triggers the weak-dependency extensions, which only compile once the
     # packages that activate them are actually loaded. The job logs showed
     # mostly those (…Ext), so the load matters as much as the precompile.
-    if ! srun ${part:+-p "$part"} --ntasks=1 --cpus-per-task=1 --mem=10G --time=00:40:00 \
+    if ! srun ${part:+-p "$part"} ${constraint:+--constraint="$constraint"} \
+              --hint=nomultithread --ntasks=1 --cpus-per-task=1 --mem=10G --time=00:40:00 \
               $JULIA_BIN --project=. -e 'using Pkg; Pkg.precompile();
                                          using ExactEntanglement, JuMP, MosekTools'; then
         echo "WARNING: could not warm the cache on a compute node; the jobs will each" >&2
