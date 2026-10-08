@@ -122,14 +122,12 @@ function ladmmInnerTolerances(obj_tol, step_tol, gd_tol, residual, high_accuracy
            min(gd_tol, max(1e-7, 0.1 * residual))
 end
 
-function ladmmConverged(residual, grad_norm, inner_obj_tol, grad_tol,
-                        objectives, param, high_accuracy)
+function ladmmConverged(residual, grad_norm, grad_tol, objectives, param)
     # The original objective is 1-z. Augmented costs from different outer
     # iterations are not comparable because their multipliers/penalties change.
-    feas_tol = high_accuracy ? param.feas_tol : inner_obj_tol
-    objective_stable = !high_accuracy || (length(objectives) == 4 &&
-        maximum(objectives) - minimum(objectives) <= param.master_obj_tol)
-    return residual < feas_tol && grad_norm < grad_tol && objective_stable
+    objective_stable = length(objectives) == 4 &&
+        maximum(objectives) - minimum(objectives) <= param.master_obj_tol
+    return residual < param.feas_tol && grad_norm < grad_tol && objective_stable
 end
 
 function ladmmKeepEarlierPoint(best_residual, best_objective, residual, objective,
@@ -388,9 +386,10 @@ by more than a factor of ten. Here the dual residual is
 Inner solves share the enclosing wall-clock deadline.
 High-accuracy standalone calls tighten their inner cost, step and gradient
 tolerances as the previous primal residual decreases; ordinary IR calls keep
-the requested tolerances. Standalone convergence requires the fixed feasibility
-tolerance, Lagrangian stationarity and a stable original objective over four
-iterates; its feasibility tolerance does not shrink with the inner cost tolerance.
+the requested tolerances. All calls use the same convergence test: fixed
+feasibility tolerance, Lagrangian stationarity and a stable original objective
+over four iterates. Feasibility does not shrink with the inner cost tolerance;
+the gradient tolerance and work budgets retain the selected mode's accuracy.
 
 When IR supplies `candidate_pool` and the preceding CP offset, retain earlier
 product states that violate that witness more than the final states. The pool
@@ -502,8 +501,8 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
     # Select among completed updates: an initial I/d at z=0 has zero residual
     # without any progress in the original threshold objective.
     best_residual, best_objective = Inf, 1-z
-    objectives = is_high_accuracy ? Float64[1-z] : Float64[]
-    if is_high_accuracy && has_point && hasproperty(previous_state, :objectives) &&
+    objectives = Float64[1-z]
+    if has_point && hasproperty(previous_state, :objectives) &&
             !isempty(previous_state.objectives)
         objectives = copy(previous_state.objectives)
     end
@@ -569,10 +568,8 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
             copyto!(best_point, pX)
             best_residual, best_objective = cur_pen, 1-z
         end
-        if is_high_accuracy
-            push!(objectives, 1-z)
-            length(objectives) > 4 && popfirst!(objectives)
-        end
+        push!(objectives, 1-z)
+        length(objectives) > 4 && popfirst!(objectives)
         # f=-z differs from the original threshold objective 1-z by a constant.
         # Track it alongside feasibility and Lagrangian stationarity.
         traceRow!(trace, i, zeta, f, pen, cur_pen, norm_vgl, z, f + L + zeta * pen)
@@ -582,10 +579,9 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
         zeta = ladmmPenalty(zeta, cur_pen, dual_residual, norm_vgl, param.heur_LADMM_penalty_update)
 
         # check convergence
-        feas_tol = is_high_accuracy ? param.feas_tol : obj_tol
         needbreak = false
-        param.log_level > 1 && println("cur_pen: ", cur_pen, " < ", feas_tol, ", norm_vgl: ", norm_vgl, "<", min_gd_tol)
-        if ladmmConverged(cur_pen, norm_vgl, obj_tol, min_gd_tol, objectives, param, is_high_accuracy)
+        param.log_level > 1 && println("cur_pen: ", cur_pen, " < ", param.feas_tol, ", norm_vgl: ", norm_vgl, "<", min_gd_tol)
+        if ladmmConverged(cur_pen, norm_vgl, min_gd_tol, objectives, param)
             needbreak = true
         end
 

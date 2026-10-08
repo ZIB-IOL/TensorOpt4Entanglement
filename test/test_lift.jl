@@ -246,15 +246,15 @@ end
     stopping = Param(feas_tol=1e-6, master_obj_tol=1e-6)
     stable = fill(0.8, 4)
     # Inner cost tolerances must not silently demand tighter outer feasibility.
-    @test E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, stable, stopping, true)
-    @test !E.ladmmConverged(2e-6, 1e-7, 1e-12, 1e-6, stable, stopping, true)
-    @test !E.ladmmConverged(8e-7, 2e-6, 1e-12, 1e-6, stable, stopping, true)
-    @test !E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, stable[1:3], stopping, true)
+    @test E.ladmmConverged(8e-7, 1e-7, 1e-6, stable, stopping)
+    @test !E.ladmmConverged(2e-6, 1e-7, 1e-6, stable, stopping)
+    @test !E.ladmmConverged(8e-7, 2e-6, 1e-6, stable, stopping)
+    @test !E.ladmmConverged(8e-7, 1e-7, 1e-6, stable[1:3], stopping)
     # Several small objective changes can still accumulate appreciable progress.
     changing = 0.8 .+ (0:3) .* 5e-7
-    @test !E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, changing, stopping, true)
-    @test !E.ladmmConverged(8e-7, 1e-7, 1e-12, 1e-6, stable, stopping, false)
-    @test E.ladmmConverged(8e-7, 1e-7, 1e-6, 1e-6, Float64[], stopping, false)
+    @test !E.ladmmConverged(8e-7, 1e-7, 1e-6, changing, stopping)
+    @test !E.ladmmConverged(8e-7, 1e-7, 1e-6, Float64[], stopping)
+    @test !E.ladmmConverged(2e-6, 1e-7, 1e-5, stable, stopping)
 
     # A worse raw objective can be useful when the final infeasibility makes
     # that objective uncertain. A much worse objective or equal residual is
@@ -376,8 +376,15 @@ end
     @test result[4] <= 1e-12
 
     # The fixed point satisfies feasibility and both scalar/manifold KKT
-    # conditions. A high-accuracy solve additionally checks objective stability
-    # across the initial point and three updates, then preserves that history.
+    # conditions. Both modes check objective stability across the initial point
+    # and three updates, then preserve that history.
+    ordinary = deepcopy(param)
+    ordinary.heur_LADMM_maxiter = ordinary.heur_LADMM1_maxiter = 5
+    ordinary_state = Ref{Any}(nothing)
+    E.ladmmSolve(nothing,dims,H,sub,weights,0.0,chi,ordinary;
+        warm_state=ordinary_state)
+    @test ordinary_state[].iterations == 3
+    @test ordinary_state[].objectives ≈ ones(4)
     accurate = Ref{Any}(nothing)
     E.ladmmSolve(nothing,dims,H,sub,weights,0.0,chi,param,false,true;
         warm_state=accurate)
@@ -471,6 +478,8 @@ end
     @test continued_state[].penalty == uninterrupted_state[].penalty
     @test continued_state[].tolerances == uninterrupted_state[].tolerances
     @test continued_state[].iterations == uninterrupted_state[].iterations == 2
+    @test continued_state[].objectives ≈ uninterrupted_state[].objectives atol=1e-12
+    @test length(continued_state[].objectives) == 3
 
     # Preserve nonuniform local scales and zero slots, neither of which
     # survives unpacking and repacking the normalised product factors.
