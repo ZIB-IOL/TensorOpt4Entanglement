@@ -5,7 +5,7 @@ lb_relx: 0.5095732341611833
 ub_heur: NaN
 feas_heur: NaN
 weights_sum: NaN
-time: 1332.745239519
+time: 1316.464480991
 status: upper_refinement_resolved_gap_remains
 gap: 0.44834669788091774
 mode: both
@@ -14,11 +14,11 @@ steps: 12
 relaxation: none
 seed: 12345
 julia: 1.11.4
-host: htc-cmp483.zib.de
+host: htc-cmp503.zib.de
 pdgr_source: https://github.com/ZIB-IOL/EntanglementDetection.jl
 frankwolfe_version: 0.4.13
 ket_version: 0.4.0
-peak_rss_mib: 1317.7
+peak_rss_mib: 1265.4
 pdgr_T: Float64
 pdgr_state_atol: 1.0e-10
 pdgr_bound_atol: 0.001
@@ -38,6 +38,6 @@ pdgr_witness_max_length: 10000000
 pdgr_witness_min_eta: 0.0
 pdgr_witness_tol: 0.0
 pdgr_witness_margin: 1.0e-12
-pdgr_time_limit: 10800.0
+pdgr_time_limit: 10797.132714986801
 pdgr_seed: 12345
 pdgr_verbose: 1
