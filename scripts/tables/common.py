@@ -257,12 +257,16 @@ def bounds_block(ctx, m, rows, pdgr_placeholder=False, known=False):
     out = []
     pdgr = load_pdgr(ctx.result_dirs) if pdgr_placeholder else {}
     exact = load_exact() if known else {}
+    # LADMM (and its rank sweep) computes no lower bound; its result files
+    # store 0.0, which must print as a dash rather than as a bound.
+    no_lb = lambda a: a == "LADMM" or a.startswith("LADMM_")
     for state in ctx.states(m):
         recs = {a: load_result(ctx.result_dirs, state, a) for a, _, _ in rows}
         rnd = lambda v: round(v, 5)
         ubs = [rnd(r["glbub"]) for r in recs.values()
                if r and r["glbub"] != 0.0 and math.isfinite(r["glbub"])]
-        lbs = [rnd(r["glblb"]) for r in recs.values() if r and math.isfinite(r["glblb"])]
+        lbs = [rnd(r["glblb"]) for a, r in recs.items()
+               if r and not no_lb(a) and math.isfinite(r["glblb"])]
         pd = pdgr.get(display_name(ctx.name(state)))
         if pd:
             # Both local PDGR runs and the published fallback compete for boldface.
@@ -284,7 +288,7 @@ def bounds_block(ctx, m, rows, pdgr_placeholder=False, known=False):
             # a zero upper bound means the algorithm reports no upper bound at all
             ub = bold(fmt(r["glbub"], dash_when=lambda v: v == 0.0),
                       best_ub is not None and rnd(r["glbub"]) == best_ub)
-            lb = bold(fmt(r["glblb"]),
+            lb = "-" if no_lb(algo) else bold(fmt(r["glblb"]),
                       best_lb is not None and math.isfinite(r["glblb"]) and rnd(r["glblb"]) == best_lb)
             # the heuristic bound is only meaningful alongside its residual
             aub = "-" if r["approxfeas"] == 0.0 else fmt(r["approxub"])
