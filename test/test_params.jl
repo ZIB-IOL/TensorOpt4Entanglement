@@ -57,7 +57,7 @@ const E = ExactEntanglement
         for (n, algo) in ((4, "LADMM"), (5, "LADMM"), (4, "LD1"), (5, "LDR3"))
             q = Param(); E.applySizePreset!(q, n, algo)
             @test q.cp_real_master
-            @test q.heur_LADMM_penalty_update == :legacy
+            @test q.heur_LADMM_penalty_update == :balance
             @test q.cp_rounds_per_ir == -1 && q.cp_certify_every == 0
             E.applyHeuristicOverrides!(q, Dict("cp-real-master"=>false))
             @test !q.cp_real_master

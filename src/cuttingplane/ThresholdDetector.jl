@@ -329,6 +329,46 @@ function irNextSeed(snapshot, previous_snapshot, cp_solution, lifted_solution)
 end
 
 """
+    ladmmLagrangianBound(separateproblem, chi, H, param) -> Float64
+
+Certified lower bound on the white-noise threshold at the LADMM multiplier
+`chi` (LADMM sign convention: residual `Psi(x) - A(z) - a`). For the visibility
+`z = 1 - noise`, weak duality for `min -z  s.t.  y = (H - I/d) z + I/d,
+y separable, z in [0, 1]` gives
+
+    noise >= 1 + min(0, -1 - <chi, H - I/d>) - <chi, I/d> + min_y <chi, y>,
+
+with the last minimum over unit-trace separable `y`. The sBB oracle bounds it
+from below as `-U`, where `U >= max_y <-chi, y>` is its certified upper bound,
+valid also when the node limit stops the search. Restores the oracle's witness
+and cutoff, so the CP master is unaffected. Returns 0.0 when unavailable.
+"""
+function ladmmLagrangianBound(separateproblem, chi, H, param)
+    (isnothing(chi) || remainingTime(param) <= 0) && return 0.0
+    cutoff = -norm(chi)
+    isfinite(cutoff) || return 0.0
+    D = size(H, 1)
+    Min = Matrix{ComplexF64}(I, D, D) / D
+    Mdir = H - Min
+    witness = Dict(:RE => -real(chi), :IM => -imag(chi))
+    saved = (separateproblem.H, separateproblem.Hout, separateproblem.cutoffbound)
+    local upper
+    try
+        separateproblem.H = witness
+        separateproblem.Hout = witness
+        # Every density matrix has Frobenius norm at most one, so this finite
+        # cutoff excludes no product state. Infinite cutoffs are not LP data.
+        separateproblem.cutoffbound = cutoff
+        _, upper, _, _ = separate!(separateproblem, param, 2, false)
+    finally
+        separateproblem.H, separateproblem.Hout, separateproblem.cutoffbound = saved
+    end
+    isfinite(upper) || return 0.0
+    bound = 1 + min(0.0, -1 - real(dot(chi, Mdir))) - real(dot(chi, Min)) - upper
+    return clamp(bound, 0.0, 1.0)
+end
+
+"""
     solveIR(HR, HI, dims, param)
 
 Iterative refinement (IR): alternate LADMM on the lifted nonconvex problem with
@@ -377,6 +417,13 @@ function solveIR(HR::Matrix{Float64}, HI::Matrix{Float64}, dims::Vector{Int64}, 
                     candidate_pool=candidates, candidate_offset=candidate_offset,
                     warm_state=ladmm_warm_state)
             lifted_solution = (purestates, substates, lifted_weights, approxub)
+            # A nearly feasible LADMM point already certifies an upper bound by
+            # geometric reconstruction, independently of the CP crossover.
+            glbub = min(glbub, geometricUpperBound(H, purestates, lifted_weights, approxub, dims))
+            if param.ir_ladmm_bound && !isnothing(ladmm_warm_state[])
+                glblb = max(glblb, ladmmLagrangianBound(separateproblem,
+                    ladmm_warm_state[].multipliers, H, param))
+            end
 
             clearStates(detector, clearall)
             addBatchStates(detector, purestates, substates, param.lazification)

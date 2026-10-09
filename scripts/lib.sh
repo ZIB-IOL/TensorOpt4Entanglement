@@ -89,6 +89,7 @@ Usage: $(basename "$0") [options]
       --heur-sbb-node-restarts INT   starts guided by each node relaxation
       --heur-sbb-maxiter INT         coordinate updates per heuristic start
       --ir-refit-scalar BOOL         refit the scalar after rank trimming
+      --ir-ladmm-bound BOOL          certify a lower bound at the LADMM multipliers
       --pdgr-mode MODE   PDGR bounds: both, ent, or sep
       --pdgr-bound-atol FLOAT       target PDGR gap
       --pdgr-max-steps INT          maximum PDGR noise probes
@@ -118,7 +119,7 @@ parse_args() {
             --trace-dir)      TRACE_DIR="$2"; shift 2 ;;
             --log-dir)        LOG_DIR="$2"; shift 2 ;;
             --julia)          JULIA_BIN="$2"; shift 2 ;;
-            --maxnnodes|--maxeffortnnodes|--maxrounds|--cp-real-master|--cp-rounds-per-ir|--cp-certify-every|--ir-refit-scalar|--seed|--log-level|--heur-sbb-maxiter|--heur-sbb-restarts|--heur-sbb-node-restarts|--heur-manopt-maxiter|--heur-ladmm-maxiter|--heur-ladmm1-maxiter|--heur-ladmm-penalty-update|--heur-ladmm-conjugates|--pdgr-mode|--pdgr-bound-atol|--pdgr-max-steps|--pdgr-fw-epsilon|--pdgr-fw-max-iteration|--pdgr-lmo-nb|--pdgr-lmo-max-iter|--pdgr-witness-max-length)
+            --maxnnodes|--maxeffortnnodes|--maxrounds|--cp-real-master|--cp-rounds-per-ir|--cp-certify-every|--ir-refit-scalar|--ir-ladmm-bound|--seed|--log-level|--heur-sbb-maxiter|--heur-sbb-restarts|--heur-sbb-node-restarts|--heur-manopt-maxiter|--heur-ladmm-maxiter|--heur-ladmm1-maxiter|--heur-ladmm-penalty-update|--heur-ladmm-conjugates|--pdgr-mode|--pdgr-bound-atol|--pdgr-max-steps|--pdgr-fw-epsilon|--pdgr-fw-max-iteration|--pdgr-lmo-nb|--pdgr-lmo-max-iter|--pdgr-witness-max-length)
                 [[ $# -ge 2 && -n "$2" && "$2" != *[[:space:]]* ]] || {
                     echo "ERROR: $1 requires one value without whitespace" >&2; exit 2;
                 }

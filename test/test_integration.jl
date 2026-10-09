@@ -411,6 +411,37 @@ else
                 @test norm(result[7][:RE]) <= norm(raw.witness[:RE])+1e-5
             end
 
+
+            @testset "the LADMM multipliers certify a Lagrangian lower bound" begin
+                # GHZ_3 has threshold 4/5. Local LADMM multipliers need not
+                # be dual-optimal, but their certified bound must be valid.
+                dims = [2, 2, 2]; D = 8
+                ghz = zeros(ComplexF64, D); ghz[1] = ghz[end] = 1 / sqrt(2)
+                H = ghz * ghz'
+                rng = MersenneTwister(5)
+                subs = [[normalize(randn(rng, ComplexF64, 2)) for _ in dims] for _ in 1:40]
+                chi0 = Dict(:RE => zeros(D, D), :IM => zeros(D, D))
+                p = Param(time_limit=120.0, log_level=0, heur_LADMM_rho=1.0,
+                    heur_LADMM_penalty_update=:balance, maxnnodes=100,
+                    maxeffortnnodes=100)
+                state = Ref{Any}(nothing)
+                E.ladmmSolve(nothing, dims, H, subs, fill(1/40, 40), 0.5, chi0, p, true, true;
+                    warm_state=state)
+                problem = E.Problem(real(H), imag(H), dims)
+                lb = E.ladmmLagrangianBound(problem, state[].multipliers, H, p)
+                @test lb <= 0.8 + 1e-6
+                @test lb > 0.0
+                # The partial transpose of the negative GHZ eigenprojector
+                # across 12|3, scaled by 8/5, attains the exact dual value.
+                # The numerical oracle may return a weaker bound or none.
+                chi = zeros(ComplexF64, D, D)
+                chi[2,2] = chi[7,7] = 0.8
+                chi[1,8] = chi[8,1] = -0.8
+                @test 0.0 <= E.ladmmLagrangianBound(problem, chi, H, p) <= 0.8 + 1e-6
+                # the oracle state used by CP is restored
+                @test problem.H[:RE] == real(H) && problem.cutoffbound == E.Problem(real(H), imag(H), dims).cutoffbound
+            end
+
         finally
             delete!(ENV, "EXACTENT_RESULTS_DIR")
         end

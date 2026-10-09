@@ -79,6 +79,9 @@ function parseCommandline()
         "--ir-refit-scalar"
             help = "Refit the scalar after CP rank trimming (default: size/algorithm preset)"
             arg_type = Bool
+        "--ir-ladmm-bound"
+            help = "Certify a Lagrangian lower bound at the LADMM multipliers after each IR pass (default: false)"
+            arg_type = Bool
         "--relaxation"
             help = "sBB relaxation: ddpsplus (DDPS + McCormick, default) or ddps"
             arg_type = String

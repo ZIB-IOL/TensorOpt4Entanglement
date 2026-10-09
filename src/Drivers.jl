@@ -121,6 +121,9 @@ function applySizePreset!(param::Param, nsubs::Int, algo::String)
         # For real targets, use the conjugate-pair master for the standalone
         # crossover too. Complex targets still use the full complex master.
         param.cp_real_master = true
+        # Residual balancing, as in IR: the legacy residual/gradient rule
+        # stalls at residuals near 1e-4 on m = 5, balancing reaches 1e-6.
+        param.heur_LADMM_penalty_update = :balance
     end
     return param
 end
@@ -157,7 +160,8 @@ function applyHeuristicOverrides!(param::Param, args)
                          ("cp-real-master", :cp_real_master),
                          ("cp-rounds-per-ir", :cp_rounds_per_ir),
                          ("cp-certify-every", :cp_certify_every),
-                         ("ir-refit-scalar", :ir_refit_scalar))
+                         ("ir-refit-scalar", :ir_refit_scalar),
+                         ("ir-ladmm-bound", :ir_ladmm_bound))
         value = get(args, key, nothing)
         isnothing(value) && continue
         if field === :heur_LADMM_penalty_update
@@ -404,7 +408,7 @@ function runEntangle(args)
         println(io, "sbb_heur_maxiter: $(param.heur_sbb_maxiter)")
         println(io, "sbb_heur_restarts: $(param.heur_sbb_restarts)")
         println(io, "sbb_heur_node_restarts: $(param.heur_sbb_node_restarts)")
-        for field in (:cp_real_master, :cp_rounds_per_ir, :cp_certify_every, :ir_refit_scalar)
+        for field in (:cp_real_master, :cp_rounds_per_ir, :cp_certify_every, :ir_refit_scalar, :ir_ladmm_bound)
             println(io, "$field: $(getfield(param, field))")
         end
         println(io, "julia: $(VERSION)")

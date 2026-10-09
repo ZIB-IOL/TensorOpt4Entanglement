@@ -39,6 +39,8 @@ Cutting plane (CP) and active set
                      intermediate rounds (0 = off); also stabilise witnesses
                      in the final phase and the witness returned to IR
   `ir_refit_scalar` refit the mixing scalar after trimming the CP support
+  `ir_ladmm_bound`  after each LADMM pass, certify a Lagrangian lower bound at
+                    its multipliers with one sBB oracle call
 
 sBB linear-minimisation oracle
   `maxnnodes`       node limit for ordinary CP iterations
@@ -120,6 +122,7 @@ mutable struct Param
    cp_rounds_per_ir::Int
    cp_certify_every::Int
    ir_refit_scalar::Bool
+   ir_ladmm_bound::Bool
    pdgr::PDGR.Options
 
    function Param(;
@@ -166,6 +169,7 @@ mutable struct Param
          cp_rounds_per_ir::Int = -1,
          cp_certify_every::Int = 0,
          ir_refit_scalar::Bool = false,
+         ir_ladmm_bound::Bool = false,
          pdgr::PDGR.Options = PDGR.Options())
       heur_LADMM_penalty_update in (:balance, :legacy) ||
          throw(ArgumentError("LADMM penalty update must be :balance or :legacy"))
@@ -185,7 +189,7 @@ mutable struct Param
           heur_alternate1_iter, heur_alternate_maxfail, max_obbt, relaxation,
           loop, start_time, is_last, tratio, lazification, pool_size,
           pointsize_bound, rank_bound, cp_real_master, cp_rounds_per_ir,
-          cp_certify_every, ir_refit_scalar, pdgr)
+          cp_certify_every, ir_refit_scalar, ir_ladmm_bound, pdgr)
       validateBoundTolerances(param)
       return param
    end

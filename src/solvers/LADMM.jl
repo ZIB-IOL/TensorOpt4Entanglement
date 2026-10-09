@@ -687,3 +687,32 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
     end
     return purestates_, substates_, 1 - z, cur_pen, weights_
 end
+
+"""
+    geometricUpperBound(H, purestates, weights, noise, dims) -> Float64
+
+Certified upper bound on the white-noise threshold from a LADMM output, by
+geometric reconstruction (as in PDGR): `sigma = sum_i w_i P_i` is separable by
+construction, since every `P_i` is a product state. If `delta` is its
+Hilbert-Schmidt distance to the trial state `(1-p) H + p I/d` and `r` the radius
+of the separable ball around `I/d`, then the state at noise
+`(p + delta/r) / (1 + delta/r)` lies on the segment between `sigma` and a point
+of that ball, hence is separable. The bound needs no LP or SDP solve, so it is
+valid even when the CP crossover cannot certify a nearly feasible point.
+Returns 1.0 (the trivial bound) when it does not apply.
+"""
+function geometricUpperBound(H, purestates, weights, noise, dims)
+    length(dims) >= 2 && !isempty(purestates) && isfinite(noise) || return 1.0
+    length(purestates) == length(weights) || return 1.0
+    all(w -> isfinite(w) && w >= 0, weights) || return 1.0
+    total = sum(weights)
+    isfinite(total) && total > 0 || return 1.0
+    sigma = sum(weights[i] * purestates[i] for i in eachindex(weights)) / total
+    D = size(H, 1)
+    p = clamp(noise, 0.0, 1.0)
+    delta = norm(sigma - ((1 - p) * H + p * Matrix{ComplexF64}(I, D, D) / D))
+    radius = PDGR.EntanglementDetection.separable_ball_radius(Float64, Tuple(dims))
+    (isfinite(delta) && radius > 0) || return 1.0
+    epsilon = delta / radius
+    return clamp((p + epsilon) / (1 + epsilon), p, 1.0)
+end

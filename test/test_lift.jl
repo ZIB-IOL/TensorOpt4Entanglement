@@ -841,3 +841,32 @@ end
             foldl(kron,[v*v' for v in detector.substates[j]]) for j in 1:expected)
     end
 end
+
+@testset "geometric reconstruction certifies an LADMM upper bound" begin
+    # A separable target reproduced exactly: the bound is the trial noise.
+    dims = [2, 2, 2]; D = prod(dims)
+    prod_state = foldl(kron, [ComplexF64[1 0; 0 0] for _ in dims])
+    @test E.geometricUpperBound(prod_state, [prod_state], [1.0], 0.0, dims) ≈ 0.0 atol=1e-12
+    # A distant mixture still yields a bound in [noise, 1], never below the trial noise.
+    ghz = zeros(ComplexF64, D); ghz[1] = ghz[end] = 1 / sqrt(2)
+    H = ghz * ghz'
+    b = E.geometricUpperBound(H, [prod_state], [1.0], 0.3, dims)
+    @test 0.3 <= b <= 1.0
+    @test E.geometricUpperBound(H, Any[], Float64[], 0.3, dims) == 1.0
+    @test E.geometricUpperBound(H, [prod_state], [-1.0], 0.3, dims) == 1.0
+    @test E.geometricUpperBound(H, [prod_state], [Inf], 0.3, dims) == 1.0
+    @test E.geometricUpperBound(H, [prod_state], Float64[], 0.3, dims) == 1.0
+
+    # From a short standalone LADMM run on GHZ_3, the certified bound must not
+    # fall below the analytic threshold 4/5 and should be close to it.
+    rng = MersenneTwister(5)
+    subs = [[normalize(randn(rng, ComplexF64, 2)) for _ in dims] for _ in 1:40]
+    w = fill(1 / 40, 40)
+    chi = Dict(:RE => zeros(D, D), :IM => zeros(D, D))
+    param = Param(time_limit=60.0, log_level=0, heur_LADMM_rho=1.0,
+        heur_LADMM_penalty_update=:balance)
+    pure, _, ub, _, weights = E.ladmmSolve(nothing, dims, H, subs, w, 0.5, chi, param, true, true)
+    bound = E.geometricUpperBound(H, pure, weights, ub, dims)
+    @test bound >= 0.8 - 1e-9
+    @test bound <= 0.8 + 1e-3
+end
