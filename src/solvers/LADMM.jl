@@ -468,10 +468,12 @@ ladmmSolve(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers,
              param::Param, is_escaping = false, is_high_accuracy = false;
              candidate_pool = nothing, candidate_offset = -Inf, warm_state = nothing) =
     withPhase(:ladmm) do
-        ALMADMMSolve_(detector, dims, H, substates, weights, z, multipliers,
-                      param, is_escaping, is_high_accuracy;
-                      candidate_pool=candidate_pool, candidate_offset=candidate_offset,
-                      warm_state=warm_state)
+        withTraceStage(:LADMM, traceStageId(detector), param) do
+            ALMADMMSolve_(detector, dims, H, substates, weights, z, multipliers,
+                          param, is_escaping, is_high_accuracy;
+                          candidate_pool=candidate_pool, candidate_offset=candidate_offset,
+                          warm_state=warm_state)
+        end
     end
 
 function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, multipliers, param::Param, is_escaping = false, is_high_accuracy = false;
@@ -628,7 +630,7 @@ function ALMADMMSolve_(detector, dims::Vector{Int64}, H, substates, weights, z, 
         length(objectives) > 4 && popfirst!(objectives)
         # f=-z differs from the original threshold objective 1-z by a constant.
         # Track it alongside feasibility and Lagrangian stationarity.
-        traceRow!(trace, i, zeta, f, pen, cur_pen, norm_vgl, z, f + L + zeta * pen)
+        traceRow!(trace, i, zeta, f, pen, cur_pen, norm_vgl, z, f + L + zeta * pen, traceStageId(detector))
 
         dual_residual = 2 * zeta * direction_norm * abs(z - previous_z)
         # chi is unscaled, so adapting zeta does not rescale the multiplier.

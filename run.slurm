@@ -83,6 +83,8 @@ if [[ -n "$resultsdir" ]]; then
     export EXACTENT_RESULTS_DIR="$resultsdir"
     export EXACTENT_TRACE="$resultsdir/traces/${instance}_${algorithm}"
     mkdir -p "$resultsdir/traces" "$resultsdir/logs"
+    # A queued job replaces its result: its traces must describe the same run.
+    rm -f "$EXACTENT_TRACE".*.csv
     logfile="$resultsdir/logs/${instance}_${algorithm}.log"
 else
     mkdir -p outputs

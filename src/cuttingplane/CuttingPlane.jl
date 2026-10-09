@@ -24,8 +24,10 @@ cuttingPlane(detector::AbstractEntanglementDetector, separateproblem, param::Par
              effortlevel = 0, singlerun = false; lower_bound = 0.0, snapshot_state = nothing,
              pricing_pool = nothing) =
     withPhase(:cp) do
-        cuttingPlane_(detector, separateproblem, param, effortlevel, singlerun;
-            lower_bound=lower_bound, snapshot_state=snapshot_state, pricing_pool=pricing_pool)
+        withTraceStage(:CP, detector.round, param) do
+            cuttingPlane_(detector, separateproblem, param, effortlevel, singlerun;
+                lower_bound=lower_bound, snapshot_state=snapshot_state, pricing_pool=pricing_pool)
+        end
     end
 
 "A matched master solution, independent of later changes to the column pool."
@@ -261,7 +263,7 @@ function cuttingPlane_(detector::AbstractEntanglementDetector, separateproblem, 
                 end
             end
             traceRow!(trace, iter, param.is_last, snapshot.upper, lower,
-                candidate_lower - current.upper, length(detector.purestates))
+                candidate_lower - current.upper, length(detector.purestates), detector.round)
             iter += 1
             addstate && !isnothing(Xvals) &&
                 retainPricingColumn!(pricing_pool, detector, Xvals, current.witness, current.offset)
