@@ -12,9 +12,8 @@ dispatches by table name.
 """
 from . import common, main, lowrank, gapclosing, ddps, memory
 
-# size.py is retained for reference but no longer registered: its numbers
-# are summarised in the caption of tab.mem, so the per-m tables it emitted
-# were never cited by the paper.
+# size.py is retained for reference; its per-size tables are not used by
+# the current paper and are not registered here.
 MODULES = (main, lowrank, gapclosing, ddps, memory)
 
 # table name -> (owning module, spec)

@@ -30,4 +30,5 @@ TABLES = {
 
 def build(name, spec, ctx):
     body = bounds_block(ctx, spec["m"], spec["rows"], pdgr_placeholder=True, known=True)
-    return wrap_table(body, BOUNDS_SPEC, BOUNDS_HEAD, spec["caption"], spec["label"])
+    return wrap_table(body, BOUNDS_SPEC, BOUNDS_HEAD, spec["caption"], spec["label"],
+                      pre=r"\setlength{\tabcolsep}{4pt}")

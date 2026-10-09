@@ -18,8 +18,8 @@ ROWS = [("DDPS", "DDPS", True),          ("DDPS+", "DDPS+", True),
 TABLES = {f"ddps{m}": dict(m=m, rows=ROWS, experiment="exp_ddps_ablation.sh")
           for m in (3, 4, 5)}
 
-# The compact ablation the paper prints: one row per instance, lower bounds
-# only, since that is the only column the two relaxations differ in.
+# The compact ablation prints upper and lower bounds for each instance,
+# comparing the standalone relaxations and the two oracle settings.
 PAIRS = [("DDPS", "DDPS+"), ("CP-DDPS", "CP"), ("IR-DDPS", "IR")]
 SPEC = "{l|l|cc|cc|cc}"
 HEAD = ("\n".join([

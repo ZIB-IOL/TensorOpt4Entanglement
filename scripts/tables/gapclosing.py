@@ -5,8 +5,9 @@ Unlike the other tables this one averages over the CP iterations that run
 not record. It is therefore built from the per-iteration trajectories
 (`<state>_<algo>.cp.csv`) written whenever EXACTENT_TRACE is set.
 
-Columns: ub_relx, lb_relx, b_lower, where b_lower is the sBB oracle's lower
-bound for that round, so lb_relx = ub_relx + b_lower.
+Columns: average recorded ub_relx and lb_relx. The latter retains earlier
+improvements and need not equal the current upper bound plus the current LMO
+correction, so the correction is not included in this table.
 
 Produced by: scripts/exp_main.sh (it records the trajectories)
 """
@@ -16,11 +17,10 @@ from .common import escape, label_of, load_trace_means, wrap_table
 
 ROWS = [("CP", "CP", True), ("IR", "IR", True)]
 
-SPEC = "{l|lccc}"
+SPEC = "{l|lcc}"
 HEAD = (r"    \textbf{State} & \textbf{Algorithm} & $\ub_{\relx}$ & "
-        r"$\lb_{\relx}$ & $\underbar{b}$   \\")
-CAPTION = (r"Average results on gap-closing CP iterations for $m=5$. Underlining as "
-           r"in \Cref{tab.m3}.")
+        r"$\lb_{\relx}$ \\")
+CAPTION = r"\lid{Average bounds during gap-closing CP iterations for $m=5$.}"
 
 TABLES = {"m5cp": dict(m=5, rows=ROWS, experiment="exp_main.sh",
                        label="tab.m5CP", caption=CAPTION)}
@@ -35,13 +35,13 @@ def build(name, spec, ctx):
             shown = label_of(algo, text, emph)
             t = load_trace_means(ctx.trace_dirs, state, algo)
             if t is None:
-                out.append(f" & {shown} & N/A & N/A & N/A \\\\")
+                out.append(f" & {shown} & - & - \\\\")
                 missing += 1
                 continue
-            out.append(f" & {shown} & {t['ub']:.5f} & {t['lb']:.5f} & {t['b']:.5f} \\\\")
+            out.append(f" & {shown} & {t['ub']:.5f} & {t['lb']:.5f} \\\\")
     out.append("\\bottomrule")
     if missing:
-        print(f"WARNING: {missing} row(s) have no gap-closing trace; "
-              f"run scripts/exp_main.sh (it records the CP trajectories)", file=sys.stderr)
+        print(f"NOTE: {missing} row(s) have no usable gap-closing iterations; "
+              f"their averages are shown as dashes", file=sys.stderr)
     return wrap_table("\n".join(out), SPEC, HEAD, spec["caption"], spec["label"],
                       toprule=r"\midrule")

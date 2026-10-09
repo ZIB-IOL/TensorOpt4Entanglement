@@ -1,18 +1,14 @@
 """Peak memory per algorithm (tab.mem).
 
-Answers the referee's "estimate of the memory requirements for each ... like
-NNZ, file size, literal memory usage or something". One row per algorithm and
-one column per subsystem count, reporting the worst case over the instances of
-that size, so the whole answer is a single small float rather than one table
-per m. The root-relaxation sizes (variables, constraints, nonzeros, CBF bytes)
-are folded into the caption, since they depend only on m and not on the state.
+Reports peak resident memory in GiB: the worst case over the instances of each
+size and the shifted geometric mean over all instances, with shift 1 GiB.
 
 Produced by: scripts/exp_main.sh
 """
 import math
 import sys
 
-from .common import ROOT, label_of, load_result, wrap_table
+from .common import label_of, load_result, wrap_table
 from .main import ROWS
 
 SPEC = "{l|rrr|r}"
@@ -76,6 +72,5 @@ def build(name, spec, ctx):
         print(f"WARNING: {missing} cell(s) have no memory diagnostics; those results "
               f"predate the instrumentation -- re-run scripts/exp_main.sh --force",
               file=sys.stderr)
-    caption = (r"\lid{Peak resident memory in GiB, worst case over the instances "
-               r"of each size.}")
+    caption = r"\lid{Peak resident memory.}"
     return wrap_table("\n".join(out), SPEC, HEAD, caption, spec["label"])

@@ -7,9 +7,8 @@ This is a dispatcher: each table family lives in its own module under
     scripts/tables/main.py        m3, m4, m5     main results
     scripts/tables/lowrank.py     m5low          LADMM rank sweep
     scripts/tables/gapclosing.py  m5cp           CP gap-closing averages
-    scripts/tables/ddps.py        ddps3/4/5      DDPS vs DDPS+ ablation
-    scripts/tables/memory.py      mem3/4/5       per-level memory
-    scripts/tables/size.py        size3/4/5      relaxation size and file size
+    scripts/tables/ddps.py        ddps, ddps3/4/5 DDPS vs DDPS+ ablation
+    scripts/tables/memory.py      mem            peak resident memory
 
 Usage
     python3 scripts/make_tables.py --table all
@@ -29,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import tables
 from tables.common import (ROOT, RESULT_DIRS, TRACE_DIRS, PROVENANCE, Context,
-                           load_instances, display_name)
+                           load_instances)
 
 
 def build(name, ctx):
@@ -58,8 +57,14 @@ def emit_manifest(wanted, ctx, out=None):
         mod, spec = tables.REGISTRY[name]
         PROVENANCE.clear()
         build(name, ctx)                       # populates PROVENANCE as a side effect
-        cells = [(s, a) for s in ctx.states(spec["m"]) for a, _, _ in spec["rows"]]
-        found = dict(PROVENANCE)
+        states = ctx.states(spec["m"]) if spec["m"] is not None else sorted(
+            ctx.instances, key=lambda s: (ctx.instances[s][1], ctx.name(s)))
+        rows = list(spec["rows"])
+        if mod is tables.main:
+            rows.append(("PDGR", "PDGR", False))
+        cells = [(s, a) for s in states for a, _, _ in rows]
+        expected = set(cells) | {(s, a + " [trace]") for s, a in cells}
+        found = {cell: path for cell, path in PROVENANCE.items() if cell in expected}
         missing = [c for c in cells
                    if c not in found and (c[0], c[1] + " [trace]") not in found]
         missing_total += len(missing)
