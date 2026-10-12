@@ -170,7 +170,8 @@ Results are searched in `results/main`, `results/lowrank`, `results/ddps`, `resu
 shadows the published data. Send throwaway runs elsewhere with `--results-dir`.
 
 The results tables print the exact threshold under each state for which one is
-known; the values and their sources are in `data/exact_thresholds.csv`.
+known, and the analytical lower bound for Cluster_5 (`relation` `>=`); the values
+and their sources are in `data/exact_thresholds.csv`.
 
 matplotlib is not a dependency: the scripts emit `.dat` files that pgfplots
 `\addplot table` reads directly.

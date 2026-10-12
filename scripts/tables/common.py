@@ -204,22 +204,26 @@ EXACT_CSV = os.path.join(ROOT, "data", "exact_thresholds.csv")
 
 
 def load_exact():
-    """Known exact thresholds by display name: (value, bibtex key)."""
+    """Known thresholds by display name: (value, bibtex key, relation).
+
+    The relation is "=" for an exact threshold and ">=" for an analytical
+    lower bound."""
     out = {}
     if os.path.isfile(EXACT_CSV):
         with open(EXACT_CSV) as fh:
             for r in csv.DictReader(l for l in fh if not l.startswith("#")):
-                out[r["instance"]] = (float(r["value"]), r["cite"])
+                out[r["instance"]] = (float(r["value"]), r["cite"], r.get("relation") or "=")
     return out
 
 
 def state_cell(name, exact=None):
-    """State label, with the known exact threshold and its source underneath."""
+    """State label, with the known threshold (or lower bound) and its source underneath."""
     if exact is None:
         return escape(name)
-    value, cite = exact
+    value, cite, rel = exact
+    op = {"=": "=", ">=": "\\ge"}[rel]
     return (f"\\shortstack[l]{{{escape(name)}\\\\ \\scriptsize"
-            f"$\\opt={value:.5f}$~\\cite{{{cite}}}" "}")
+            f"$\\opt{op}{value:.5f}$~\\cite{{{cite}}}" "}")
 
 
 def load_pdgr(result_dirs=None):
