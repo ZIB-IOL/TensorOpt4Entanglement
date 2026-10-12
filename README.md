@@ -126,11 +126,11 @@ paper_dir=/path/to/paper
 
 | paper | content | experiment | generator |
 |---|---|---|---|
-| Table 1 (`tab.mem`) | peak memory | `bash runjobs.sh main` | `python3 scripts/make_tables.py --table mem --out "$paper_dir/tables"` |
+| Table 1 (`tab.m3`) | results, m=3 | `bash runjobs.sh main --size 3` | `python3 scripts/make_tables.py --table m3 --out "$paper_dir/tables"` |
+| Table 2 (`tab.m4`) | results, m=4 | `bash runjobs.sh main --size 4` | `python3 scripts/make_tables.py --table m4 --out "$paper_dir/tables"` |
+| Table 3 (`tab.m5`) | results, m=5 | `bash runjobs.sh main --size 5` | `python3 scripts/make_tables.py --table m5 --out "$paper_dir/tables"` |
+| Table 4 (`tab.mem`) | peak memory | `bash runjobs.sh main` | `python3 scripts/make_tables.py --table mem --out "$paper_dir/tables"` |
 | Figure 1 (`fig.profiles`) | bounds per instance, lower-bound profile | `bash runjobs.sh main` | `python3 scripts/make_figures.py --figure bounds --out "$paper_dir"` |
-| Table 2 (`tab.m3`) | results, m=3 | `bash runjobs.sh main --size 3` | `python3 scripts/make_tables.py --table m3 --out "$paper_dir/tables"` |
-| Table 3 (`tab.m4`) | results, m=4 | `bash runjobs.sh main --size 4` | `python3 scripts/make_tables.py --table m4 --out "$paper_dir/tables"` |
-| Table 4 (`tab.m5`) | results, m=5 | `bash runjobs.sh main --size 5` | `python3 scripts/make_tables.py --table m5 --out "$paper_dir/tables"` |
 | Table 5 (`tab.ddps`) | DDPS vs DDPS+ ablation | `bash runjobs.sh ddps_ablation` and `bash runjobs.sh main --algo DDPS+ --algo CP --algo IR` | `python3 scripts/make_tables.py --table ddps --out "$paper_dir/tables"` |
 | Table 6 (`tab.m5low`) | LADMM rank sweep, m=5 | `bash runjobs.sh lowrank` | `python3 scripts/make_tables.py --table m5low --out "$paper_dir/tables"` |
 | Table 7 (`tab.m5CP`) | gap-closing CP averages, m=5 | `bash runjobs.sh main --size 5 --algo CP --algo IR` | `python3 scripts/make_tables.py --table m5cp --out "$paper_dir/tables"` |
@@ -200,7 +200,7 @@ found before a timeout are saved. Provenance and changes:
 ```
 ub_relx / lb_relx / ub_heur / feas_heur / time     reported values
 relaxation / seed / julia / host                   provenance
-peak_rss_mib                                       peak memory (Table 1)
+peak_rss_mib                                       peak memory (Table 4)
 relax_nvars / relax_ncons / relax_nnz              root relaxation size
 mem_total_* / mem_cp_* / mem_lmo_* / mem_ladmm_*   memory per level (nested)
 ```
