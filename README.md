@@ -233,3 +233,20 @@ test/           Julia and Python tests
 scripts/        experiment drivers (exp_*.sh) and analysis (make_*.py)
 results/        output
 ```
+
+## Citation
+
+If you use this code, please cite:
+
+```bibtex
+@misc{xu2025convex,
+  author        = {Xu, Liding and Liu, Ye-Chao and Pokutta, Sebastian},
+  title         = {Convex semidefinite tensor optimization and quantum entanglement},
+  year          = {2025},
+  eprint        = {2511.05258},
+  archivePrefix = {arXiv},
+  primaryClass  = {math.OC},
+  doi           = {10.48550/arXiv.2511.05258},
+  url           = {https://arxiv.org/abs/2511.05258},
+}
+```
