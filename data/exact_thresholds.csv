@@ -6,6 +6,8 @@
 #   Dicke_m_1:  1 - 1/(1 + 2^m sqrt((m-1)/(2m)))     chen2020noise, Eq. (8), exact for m <= 5
 #   Dicke_3_2:  equal to Dicke_3_1 (local X^{(x)3})  chen2020noise
 #   Dicke_4_2:  32/35 (Eq. (18) with u = v = 1)      chen2020noise
+#   Cluster_5:  no row -- only the PPT lower bound 16/17 is analytical
+#               (miller2023shor, Eq. (54)); the IR upper bound matches it numerically
 instance,value,cite
 GHZ_3,0.8,Dur2000classification
 GHZ_4,0.8888888888888888,Dur2000classification
