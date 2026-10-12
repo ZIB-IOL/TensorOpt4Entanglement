@@ -134,7 +134,7 @@ paper_dir=/path/to/paper
 | Table 5 (`tab.ddps`) | DDPS vs DDPS+ ablation | `bash runjobs.sh ddps_ablation` and `bash runjobs.sh main --algo DDPS+ --algo CP --algo IR` | `python3 scripts/make_tables.py --table ddps --out "$paper_dir/tables"` |
 | Table 6 (`tab.m5low`) | LADMM rank sweep, m=5 | `bash runjobs.sh lowrank` | `python3 scripts/make_tables.py --table m5low --out "$paper_dir/tables"` |
 | Table 7 (`tab.m5CP`) | gap-closing CP averages, m=5 | `bash runjobs.sh main --size 5 --algo CP --algo IR` | `python3 scripts/make_tables.py --table m5cp --out "$paper_dir/tables"` |
-| Figure 2 (`fig.conv.m5`) | CP and IR convergence, m=5 | `bash runjobs.sh main --size 5 --algo CP --algo IR` | `python3 scripts/make_figures.py --figure convergence --out "$paper_dir"` |
+| Figure 2 (`fig.conv.m5`) | LADMM and CP trajectories within IR, m=5 | `bash runjobs.sh main --size 5 --algo CP --algo IR` | `python3 scripts/make_figures.py --figure convergence --out "$paper_dir"` |
 
 Table 5 pairs each DDPS run from `ddps_ablation` with its DDPS+ counterpart
 from `main`, so it needs both. Table 7 and Figure 2 read the CP trajectories
@@ -146,6 +146,13 @@ Everything at once:
 bash runjobs.sh                                           # all three parts
 python3 scripts/make_tables.py  --out "$paper_dir/tables" # all tables
 python3 scripts/make_figures.py --out "$paper_dir"        # all figures
+```
+
+To trace a table cell back to its data:
+
+```bash
+python3 scripts/make_tables.py --list       # each table and the experiment it reads
+python3 scripts/make_tables.py --manifest   # the raw result file behind every cell
 ```
 
 For debugging, a single job or a short smoke run kept apart from the
@@ -206,7 +213,8 @@ mem_total_* / mem_cp_* / mem_lmo_* / mem_ladmm_*   memory per level (nested)
 ```
 
 `EXACTENT_TRACE` is a path prefix; the loops append `<prefix>.cp.csv`
-(`iter,is_last,ub_relx,lb_relx,b_lower,n_states`) and `<prefix>.ladmm.csv`.
+(`iter,is_last,ub_relx,lb_relx,b_lower,n_states,stage`) and `<prefix>.ladmm.csv`
+(`iter,zeta,f,pen,residual,grad_norm,z,alm,stage`).
 The experiment scripts set it automatically. To skip the extra model build:
 
 ```bash

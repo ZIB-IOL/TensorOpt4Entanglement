@@ -16,7 +16,7 @@ Usage
     python3 scripts/make_tables.py --manifest      # raw file behind every cell
     python3 scripts/make_tables.py --list          # tables and their experiments
 
-Results are searched in results/main, results/lowrank, results/ddps, then
+Results are searched in results/main, results/lowrank, results/ddps, results/pdgr, then
 results/ itself (the flat files published with the paper), first hit winning,
 so a fresh run shadows the published one without deleting it.
 """
